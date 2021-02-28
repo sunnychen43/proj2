@@ -49,17 +49,19 @@ tcb_t* peek(ThreadQueue *queue) {
 }
 
 
-tcb_t *new_tcb(rpthread_t tid, int thread_state) {
+tcb_t *new_tcb(rpthread_t tid, int thread_state, int thread_priority) {
 	tcb_t *tcb = (tcb_t *) malloc(sizeof(*tcb));
 	tcb->tid = tid;
 	tcb->thread_state = thread_state;
-	tcb->thread_priority = 0;
+	tcb->thread_priority = thread_priority;
 	return tcb;
 }
 
 
-static scheduler_t *scheduler;
+void timeout_handler(int signum);
 
+
+static scheduler_t *scheduler;
 
 void init_scheduler() {
 
@@ -68,16 +70,25 @@ void init_scheduler() {
 	// setup scheduler context
 	ucontext_t *sch_uctx = &(scheduler->sch_uctx);
 	getcontext(sch_uctx);
+	sch_uctx->uc_stack.ss_sp = malloc(16384);
+	sch_uctx->uc_stack.ss_size = 16384;
 	sch_uctx->uc_link = NULL;
-	sch_uctx->uc_stack.ss_sp = scheduler->stack;
-	sch_uctx->uc_stack.ss_size = sizeof(scheduler->stack);
 	makecontext(sch_uctx, &schedule, 0);
 
-	tcb_t *main_tcb = new_tcb(0, SCHEDULED);
+	ucontext_t *exit_uctx = &(scheduler->exit_uctx);
+	getcontext(exit_uctx);
+	sch_uctx->uc_stack.ss_sp = malloc(1000);
+	sch_uctx->uc_stack.ss_size = 1000;
+	sch_uctx->uc_link = NULL;
+	makecontext(sch_uctx, &timeout_handler, 0);
+
+	// create main thread
+	tcb_t *main_tcb = new_tcb(0, SCHEDULED, 0);
 	getcontext(&(main_tcb->uctx));
 	scheduler->running = main_tcb;
 
 	scheduler->tqueue = new_queue();
+	scheduler->thread_counter = 1;
 }
 
 
@@ -86,7 +97,16 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 	
 	if (scheduler == NULL) {init_scheduler();}
 
-	
+	tcb_t *tcb = new_tcb(scheduler->thread_counter, READY, 0);
+	ucontext_t *uctx = &(tcb->uctx);
+	getcontext(uctx);
+	uctx->uc_stack.ss_sp = malloc(SSIZE);
+	uctx->uc_stack.ss_size = SSIZE;
+	uctx->uc_link = &(scheduler->exit_uctx);
+	makecontext(uctx, function, 1, arg);
+
+	scheduler->thread_counter++;
+	enqueue(scheduler->tqueue, tcb);
 	
     return 0;
 };
@@ -106,8 +126,26 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 };
 
 static void schedule() {
-
+	tcb_t *running_tcb = scheduler->running->tcb;
+	
+	if (running_tcb->thread_state == FINISHED) {
+		free(running_tcb->uctx.uc_stack.ss_sp);
+		free(running_tcb);
+		free(scheduler->running);
+		scheduler->running = NULL;
+	}
 }
+
+
+void timeout_handler(int signum) {
+	tcb_t *fin_thread = scheduler->running;
+	fin_thread->thread_state = FINISHED;
+
+	makecontext(&(scheduler->sch_uctx), schedule, 0);
+	setcontext(&(scheduler->sch_uctx));
+}
+
+
 
 /* initialize the mutex lock */
 int rpthread_mutex_init(rpthread_mutex_t *mutex, 

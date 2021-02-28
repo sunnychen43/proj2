@@ -21,6 +21,7 @@
 #define READY 0
 #define SCHEDULED 1
 #define BLOCKED 2
+#define FINISHED 3
 
 #define SSIZE 16384
 
@@ -30,6 +31,7 @@ typedef uint rpthread_t;
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ucontext.h>
@@ -54,10 +56,11 @@ typedef struct thread_control_block {
 } tcb_t; 
 
 typedef struct scheduler_t {
-	ucontext_t sch_uctx;
-	char stack[16384];
-	tcb_t *running;
+	ucontext_t sch_uctx, exit_uctx;
+
+	ThreadNode *running;
 	ThreadQueue *tqueue;
+	int thread_counter;
 } scheduler_t;
 
 typedef struct rpthread_mutex_t {

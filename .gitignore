@@ -4,3 +4,7 @@
 
 test.c
 *.txt
+
+*.json
+.gdb_history
+*.out
