@@ -1,5 +1,6 @@
 #include "rpthread.h"
 
+static void schedule();
 
 /********** Queue Implementation **********/
 ThreadQueue* new_queue() {
@@ -10,7 +11,7 @@ ThreadQueue* new_queue() {
 	return queue;
 }
 
-void enqueue(ThreadQueue *queue, ThreadNode *node) {
+void enqueue(ThreadQueue *queue, tcb_t *node) {
 	if (queue->tail == NULL) {
 		queue->head = node;
 	}
@@ -18,14 +19,15 @@ void enqueue(ThreadQueue *queue, ThreadNode *node) {
 		queue->tail->next = node;
 	}
 	queue->tail = node;
+	node->next = NULL;
 	queue->size++;
 }
 
-ThreadNode* dequeue(ThreadQueue *queue) {
+tcb_t* dequeue(ThreadQueue *queue) {
 	if (queue->size == 0) {
 		return NULL;
 	}
-	ThreadNode *node = queue->head;
+	tcb_t *node = queue->head;
 	if (node->next == NULL) {
 		queue->tail = NULL;
 	}
@@ -35,44 +37,84 @@ ThreadNode* dequeue(ThreadQueue *queue) {
 	return node;
 }
 
-ThreadNode* peek(ThreadQueue *queue) {
+tcb_t* dequeue_tcb(ThreadQueue *queue, tcb_t *tcb) {
+	if (tcb == queue->head)
+		return dequeue(queue);
+
+	if (tcb == queue->tail) {
+		tcb_t *prev = NULL;
+		tcb_t *curr = queue->head;
+		while (curr->next != NULL) {
+			prev = curr;
+			curr = curr->next;
+		}
+
+		prev->next = NULL;
+		queue->tail = prev;
+		queue->size--;
+		return tcb;
+	}
+
+	tcb_t *prev = queue->head;
+	tcb_t *curr = queue->head->next;
+
+	while (curr != NULL) {
+		if (curr == tcb) {
+			prev->next = NULL;
+			curr->next = NULL;
+
+			queue->tail->next = queue->head;
+			queue->head = curr->next;
+			queue->tail = prev;
+			queue->size--;
+			return curr;
+		}
+		prev = curr;
+		curr = curr->next;
+	}
+	
+	return NULL;
+}
+
+tcb_t* peek(ThreadQueue *queue) {
 	if (queue->size == 0) {
 		return NULL;
 	}
 	return queue->head;
 }
 
-ThreadNode* new_node(tcb_t *tcb) {
-	ThreadNode *node = (ThreadNode *) malloc(sizeof(*node));
-	node->tcb = tcb;
-	node->next = NULL;
-	return node;
-}
 
-
-tcb_t *new_tcb(rpthread_t tid, int thread_state, int thread_priority) {
+tcb_t* new_tcb(rpthread_t tid, int thread_priority) {
 	tcb_t *tcb = (tcb_t *) malloc(sizeof(*tcb));
 	tcb->tid = tid;
-	tcb->thread_state = thread_state;
 	tcb->thread_priority = thread_priority;
+	tcb->next = NULL;
 	return tcb;
 }
 
+void free_tcb(tcb_t *tcb) {
+	free(tcb->uctx.uc_stack.ss_sp);
+	free(tcb);
+}
 
-void handle_timeout(int signum);
-void handle_exit();
+void print_queue(ThreadQueue *queue) {
+	tcb_t *curr = queue->head;
+	while (curr != NULL) {
+		printf("%d->", curr->tid);
+		curr = curr->next;
+	}
+	printf("\n");
+}
 
 
-static scheduler_t *scheduler;
-struct itimerval itimer;
 
-static void schedule();
+static Scheduler *scheduler;
+static struct itimerval itimer, pause_itimer, tmp_itimer;
 
-
-void setup_context(ucontext_t *uc, void (*func)(), int ss_size, ucontext_t *uc_link, void *arg) {
+void setup_context(ucontext_t *uc, void (*func)(), ucontext_t *uc_link, void *arg) {
 	getcontext(uc);
-	uc->uc_stack.ss_sp = malloc(ss_size);
-	uc->uc_stack.ss_size = ss_size;
+	uc->uc_stack.ss_sp = malloc(SS_SIZE);
+	uc->uc_stack.ss_size = SS_SIZE;
 	uc->uc_link = uc_link;
 
 	if (arg != NULL) {
@@ -84,54 +126,81 @@ void setup_context(ucontext_t *uc, void (*func)(), int ss_size, ucontext_t *uc_l
 }
 
 
+// typedef struct Scheduler {
+// 		ThreadQueue *thread_queue;
+// 		tcb_t 	   	*running;
+//
+// 		char		*ts_arr;
+// 		uint8_t		 ts_count;
+// 		uint8_t		 ts_size;
+//
+// 		ucontext_t 	 exit_uctx;
+//
+// } Scheduler;
+
 void init_scheduler() {
 
-	scheduler = (scheduler_t *) malloc(sizeof(*scheduler));
+	scheduler = (Scheduler *) malloc(sizeof(*scheduler));
 
-	// setup scheduler context
-	ucontext_t *sch_uctx = &(scheduler->sch_uctx);
-	setup_context(sch_uctx, schedule, SSIZE, NULL, NULL);
-
-	ucontext_t *exit_uctx = &(scheduler->exit_uctx);
-	setup_context(exit_uctx, handle_exit, 1000, NULL, NULL);
+	// setup queue
+	scheduler->thread_queue = new_queue();
 
 	// create main thread
-	tcb_t *main_tcb = new_tcb(0, SCHEDULED, 0);
+	tcb_t *main_tcb = new_tcb(0, 0);
 	getcontext(&(main_tcb->uctx));
+	scheduler->running = main_tcb;
 
-	ThreadNode *main_node = new_node(main_tcb);
-	scheduler->running = main_node;
+	// setup thread info
+	scheduler->ts_arr = (char *) malloc(32 * sizeof(char));
+	scheduler->ts_arr[0] = SCHEDULED;  // main thread scheduled
+	scheduler->ts_count = 1;
+	scheduler->ts_size = 32;
 
-	scheduler->tqueue = new_queue();
-	scheduler->thread_counter = 1;
+	// setup exit context
+	setup_context(&(scheduler->exit_uctx), handle_exit, NULL, NULL);
 
-	
+	//setup itimer
 	itimer.it_interval.tv_sec = 0;
-	itimer.it_interval.tv_usec = 20000;
+	itimer.it_interval.tv_usec = TIMESLICE;
 	itimer.it_value = itimer.it_interval;
 
 	signal(SIGALRM, handle_timeout);
-	setitimer(ITIMER_REAL, &itimer, NULL);
 }
 
 
 int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 					void *(*function)(void *), void *arg) {
 	
-	if (scheduler == NULL) {init_scheduler();}
+	if (scheduler == NULL) {
+		printf("init scheduler\n");
+		init_scheduler();
+	}
+	else {
+		setitimer(ITIMER_REAL, &pause_itimer, &itimer);
+	}
 
-	tcb_t *tcb = new_tcb(scheduler->thread_counter, READY, 0);
-	ucontext_t *uctx = &(tcb->uctx);
-	setup_context(uctx, function, SSIZE, &(scheduler->exit_uctx), arg);
+	*thread = scheduler->ts_count;
+	scheduler->ts_count++;
 
-	scheduler->thread_counter++;
-	enqueue(scheduler->tqueue, new_node(tcb));
+	tcb_t *tcb = new_tcb(*thread, 0);
+	setup_context(&(tcb->uctx), function, &(scheduler->exit_uctx), arg);
+
+	// resize ts_arr
+	if (scheduler->ts_count > scheduler->ts_size) {
+		scheduler->ts_size *= 2;
+		scheduler->ts_arr = (char *) realloc(scheduler->ts_arr, scheduler->ts_size * sizeof(char));
+	}
+	scheduler->ts_arr[*thread] = READY;
+	enqueue(scheduler->thread_queue, tcb);
+
+	setitimer(ITIMER_REAL, &itimer, NULL);
 	
     return 0;
 };
 
 int rpthread_yield() {
-
+	scheduler->ts_arr[scheduler->running->tid] = YIELD;
+	schedule();
 	return 0;
 };
 
@@ -140,66 +209,115 @@ void rpthread_exit(void *value_ptr) {
 };
 
 int rpthread_join(rpthread_t thread, void **value_ptr) {
-
+	while (scheduler->ts_arr[thread] != FINISHED) {
+		rpthread_yield();
+	}
 	return 0;
 };
 
+tcb_t *find_next_ready(ThreadQueue *thread_queue) {
+	tcb_t *curr = thread_queue->head;
+	while (curr != NULL) {
+		if (scheduler->ts_arr[curr->tid] == READY)
+			return curr;
+		curr = curr->next;
+	}
+	return NULL;
+}
+
 static void schedule() {
-	tcb_t *running_tcb = scheduler->running->tcb;
+	setitimer(ITIMER_REAL, &pause_itimer, &itimer);
+	print_queue(scheduler->thread_queue);
 
-	if (running_tcb->thread_state == FINISHED) {
-		free(running_tcb->uctx.uc_stack.ss_sp);
-		free(running_tcb);
-		free(scheduler->running);
-		scheduler->running = NULL;
-		if (scheduler->tqueue->size == 0) {return;}
+	tcb_t *old_tcb = scheduler->running;
+
+	// called from handle_exit
+	if (scheduler->ts_arr[old_tcb->tid] == FINISHED) {
+		free_tcb(old_tcb);
+		if (scheduler->thread_queue->size == 0)  // no threads left
+			return;
+		
+		// load next thread
+		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
+		dequeue_tcb(scheduler->thread_queue, next_thread);
+
+		scheduler->running = next_thread;
+		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+		setitimer(ITIMER_REAL, &itimer, NULL);
+		setcontext(&(scheduler->running->uctx));
 	}
 
-	if (scheduler->tqueue->size > 0) {
-		enqueue(scheduler->tqueue, scheduler->running);
-		scheduler->running = dequeue(scheduler->tqueue);
-	}
+	// called from handle_timeout
+	else {
+		if (scheduler->thread_queue->size == 0) {  // skip scheduling, resume current thread
+			scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+			setitimer(ITIMER_REAL, &itimer, NULL);
+			setcontext(&(scheduler->running->uctx));
+		}
+		
+		scheduler->ts_arr[scheduler->running->tid] = READY;
+		enqueue(scheduler->thread_queue, scheduler->running);
 
-	swapcontext(&(running_tcb->uctx), &(scheduler->running->tcb->uctx));
+		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
+		dequeue_tcb(scheduler->thread_queue, next_thread);
+
+		scheduler->running = next_thread;
+
+		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+
+		setitimer(ITIMER_REAL, &itimer, NULL);
+		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
+	}
 }
 
 
 void handle_exit() {
-	tcb_t *tcb = scheduler->running->tcb;
-	tcb->thread_state = FINISHED;
+	tcb_t *tcb = scheduler->running;
+	scheduler->ts_arr[tcb->tid] = FINISHED;
 	schedule();
 }
 
 void handle_timeout(int signum) {
-	printf("timeout\n");
+	printf("timeout %d\n", scheduler->running->tid);
 	schedule();
 }
 
 
 void funcA() {
-	int i=0;
-    while (1) {
+	// int i=0;
+    // while (1) {
+	// 	printf("a: %d\n", i);
+	// 	i++;
+	// }
+
+	for (int i=0; i < 100000; i++) {
 		printf("a: %d\n", i);
-		i++;
 	}
 }
 
 void funcB() {
-	int i=0;
-    while (1) {
+	// int i=0;
+    // while (1) {
+	// 	printf("b: %d\n", i);
+	// 	i++;
+	// }
+
+	for (int i=0; i < 100000; i++) {
 		printf("b: %d\n", i);
-		i++;
 	}
 }
 
 int main() {
 
-	rpthread_create(NULL, NULL, funcA, NULL);
-	rpthread_create(NULL, NULL, funcB, NULL);
+	rpthread_t a, b;
+	
+	rpthread_create(&a, NULL, funcA, NULL);
+	rpthread_create(&b, NULL, funcB, NULL);
 
-	while (1) {
-		printf("main\n");
-	}
+	rpthread_join(a, NULL);
+	rpthread_join(b, NULL);
+
+	printf("done\n");
 
 	return 0;
 }

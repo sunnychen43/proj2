@@ -22,8 +22,9 @@
 #define SCHEDULED 1
 #define BLOCKED 2
 #define FINISHED 3
+#define YIELD 4
 
-#define SSIZE 16384
+#define SS_SIZE 16384
 
 /* include lib header files that you need here: */
 #include <unistd.h>
@@ -38,31 +39,36 @@
 
 typedef uint8_t rpthread_t;
 
-typedef struct ThreadNode {
-	struct tcb_t *tcb;
-	struct ThreadNode *next;
-} ThreadNode;
 
 typedef struct ThreadQueue {
-	struct ThreadNode *head, *tail;
+	struct tcb_t *head;
+	struct tcb_t *tail;
 	int size;
+
 } ThreadQueue;
 
 
 typedef struct tcb_t {
-	rpthread_t tid;
-	int thread_state;
-	int thread_priority;
-	ucontext_t uctx;
-} tcb_t; 
+	rpthread_t 	tid;
+	uint8_t 	thread_priority;
 
-typedef struct scheduler_t {
-	ucontext_t sch_uctx, exit_uctx;
+	ucontext_t 	uctx;
+	struct tcb_t *next;
 
-	ThreadNode *running;
-	ThreadQueue *tqueue;
-	int thread_counter;
-} scheduler_t;
+} tcb_t;
+
+
+typedef struct Scheduler {
+	ThreadQueue *thread_queue;
+	tcb_t 	   	*running;
+
+	char		*ts_arr;
+	uint8_t		 ts_count;
+	uint8_t		 ts_size;
+
+	ucontext_t 	 exit_uctx;
+
+} Scheduler;
 
 typedef struct rpthread_mutex_t {
 
@@ -71,10 +77,10 @@ typedef struct rpthread_mutex_t {
 
 
 ThreadQueue* new_queue();
-void enqueue(ThreadQueue *queue, ThreadNode *node);
-ThreadNode* dequeue(ThreadQueue *queue);
-ThreadNode* peek(ThreadQueue *queue);
-ThreadNode* new_node(tcb_t *tcb);
+void enqueue(ThreadQueue *queue, tcb_t *tcb);
+tcb_t* dequeue(ThreadQueue *queue);
+tcb_t* peek(ThreadQueue *queue);
+tcb_t* new_node(tcb_t *tcb);
 
 int rpthread_create(rpthread_t *thread, pthread_attr_t *attr, void *(*function)(void *), void *arg);
 int rpthread_yield();
@@ -86,6 +92,8 @@ int rpthread_mutex_lock(rpthread_mutex_t *mutex);
 int rpthread_mutex_unlock(rpthread_mutex_t *mutex);
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex);
 
+void handle_timeout(int signum);
+void handle_exit();
 
 
 #ifdef USE_RTHREAD
