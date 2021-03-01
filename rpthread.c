@@ -69,38 +69,48 @@ struct itimerval itimer;
 static void schedule();
 
 
+void setup_context(ucontext_t *uc, void (*func)(), int ss_size, ucontext_t *uc_link, void *arg) {
+	getcontext(uc);
+	uc->uc_stack.ss_sp = malloc(ss_size);
+	uc->uc_stack.ss_size = ss_size;
+	uc->uc_link = uc_link;
+
+	if (arg != NULL) {
+		makecontext(uc, func, 1, arg);
+	}
+	else {
+		makecontext(uc, func, 0);
+	}
+}
+
+
 void init_scheduler() {
 
 	scheduler = (scheduler_t *) malloc(sizeof(*scheduler));
 
 	// setup scheduler context
 	ucontext_t *sch_uctx = &(scheduler->sch_uctx);
-	getcontext(sch_uctx);
-	sch_uctx->uc_stack.ss_sp = malloc(16384);
-	sch_uctx->uc_stack.ss_size = 16384;
-	sch_uctx->uc_link = NULL;
-	makecontext(sch_uctx, schedule, 0);
+	setup_context(sch_uctx, schedule, SSIZE, NULL, NULL);
 
 	ucontext_t *exit_uctx = &(scheduler->exit_uctx);
-	getcontext(exit_uctx);
-	sch_uctx->uc_stack.ss_sp = malloc(1000);
-	sch_uctx->uc_stack.ss_size = 1000;
-	sch_uctx->uc_link = NULL;
-	makecontext(sch_uctx, handle_exit, 0);
+	setup_context(exit_uctx, handle_exit, 1000, NULL, NULL);
 
 	// create main thread
 	tcb_t *main_tcb = new_tcb(0, SCHEDULED, 0);
 	getcontext(&(main_tcb->uctx));
+
 	ThreadNode *main_node = new_node(main_tcb);
 	scheduler->running = main_node;
 
 	scheduler->tqueue = new_queue();
 	scheduler->thread_counter = 1;
 
-	signal(SIGALRM, handle_timeout);
+	
 	itimer.it_interval.tv_sec = 0;
 	itimer.it_interval.tv_usec = 20000;
 	itimer.it_value = itimer.it_interval;
+
+	signal(SIGALRM, handle_timeout);
 	setitimer(ITIMER_REAL, &itimer, NULL);
 }
 
@@ -112,11 +122,7 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 
 	tcb_t *tcb = new_tcb(scheduler->thread_counter, READY, 0);
 	ucontext_t *uctx = &(tcb->uctx);
-	getcontext(uctx);
-	uctx->uc_stack.ss_sp = malloc(SSIZE);
-	uctx->uc_stack.ss_size = SSIZE;
-	uctx->uc_link = &(scheduler->exit_uctx);
-	makecontext(uctx, function, 1, arg);
+	setup_context(uctx, function, SSIZE, &(scheduler->exit_uctx), arg);
 
 	scheduler->thread_counter++;
 	enqueue(scheduler->tqueue, new_node(tcb));
@@ -139,8 +145,6 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 };
 
 static void schedule() {
-	printf("a\n");
-
 	tcb_t *running_tcb = scheduler->running->tcb;
 
 	if (running_tcb->thread_state == FINISHED) {
