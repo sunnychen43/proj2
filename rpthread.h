@@ -25,8 +25,6 @@
 
 #define SSIZE 16384
 
-typedef uint rpthread_t;
-
 /* include lib header files that you need here: */
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -34,11 +32,14 @@ typedef uint rpthread_t;
 #include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <ucontext.h>
+#include <stdint.h>
 
+typedef uint8_t rpthread_t;
 
 typedef struct ThreadNode {
-	tcb_t *tcb;
+	struct tcb_t *tcb;
 	struct ThreadNode *next;
 } ThreadNode;
 
@@ -48,7 +49,7 @@ typedef struct ThreadQueue {
 } ThreadQueue;
 
 
-typedef struct thread_control_block {
+typedef struct tcb_t {
 	rpthread_t tid;
 	int thread_state;
 	int thread_priority;
@@ -70,9 +71,10 @@ typedef struct rpthread_mutex_t {
 
 
 ThreadQueue* new_queue();
-void enqueue(ThreadQueue *queue, tcb_t *tcb);
-tcb_t* dequeue(ThreadQueue *queue);
-tcb_t* peek(ThreadQueue *queue);
+void enqueue(ThreadQueue *queue, ThreadNode *node);
+ThreadNode* dequeue(ThreadQueue *queue);
+ThreadNode* peek(ThreadQueue *queue);
+ThreadNode* new_node(tcb_t *tcb);
 
 int rpthread_create(rpthread_t *thread, pthread_attr_t *attr, void *(*function)(void *), void *arg);
 int rpthread_yield();

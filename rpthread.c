@@ -10,11 +10,7 @@ ThreadQueue* new_queue() {
 	return queue;
 }
 
-void enqueue(ThreadQueue *queue, tcb_t *tcb) {
-	ThreadNode *node = (ThreadNode *) malloc(sizeof(*node));
-	node->tcb = tcb;
-	node->next = NULL;
-
+void enqueue(ThreadQueue *queue, ThreadNode *node) {
 	if (queue->tail == NULL) {
 		queue->head = node;
 	}
@@ -25,27 +21,32 @@ void enqueue(ThreadQueue *queue, tcb_t *tcb) {
 	queue->size++;
 }
 
-tcb_t* dequeue(ThreadQueue *queue) {
+ThreadNode* dequeue(ThreadQueue *queue) {
 	if (queue->size == 0) {
 		return NULL;
 	}
-	tcb_t *tcb = queue->head->tcb;
 	ThreadNode *node = queue->head;
 	if (node->next == NULL) {
 		queue->tail = NULL;
 	}
 	queue->head = node->next;
 	queue->size--;
-	free(node);
 
-	return tcb;
+	return node;
 }
 
-tcb_t* peek(ThreadQueue *queue) {
+ThreadNode* peek(ThreadQueue *queue) {
 	if (queue->size == 0) {
 		return NULL;
 	}
-	return queue->head->tcb;
+	return queue->head;
+}
+
+ThreadNode* new_node(tcb_t *tcb) {
+	ThreadNode *node = (ThreadNode *) malloc(sizeof(*node));
+	node->tcb = tcb;
+	node->next = NULL;
+	return node;
 }
 
 
@@ -58,10 +59,15 @@ tcb_t *new_tcb(rpthread_t tid, int thread_state, int thread_priority) {
 }
 
 
-void timeout_handler(int signum);
+void handle_timeout(int signum);
+void handle_exit();
 
 
 static scheduler_t *scheduler;
+struct itimerval itimer;
+
+static void schedule();
+
 
 void init_scheduler() {
 
@@ -73,22 +79,29 @@ void init_scheduler() {
 	sch_uctx->uc_stack.ss_sp = malloc(16384);
 	sch_uctx->uc_stack.ss_size = 16384;
 	sch_uctx->uc_link = NULL;
-	makecontext(sch_uctx, &schedule, 0);
+	makecontext(sch_uctx, schedule, 0);
 
 	ucontext_t *exit_uctx = &(scheduler->exit_uctx);
 	getcontext(exit_uctx);
 	sch_uctx->uc_stack.ss_sp = malloc(1000);
 	sch_uctx->uc_stack.ss_size = 1000;
 	sch_uctx->uc_link = NULL;
-	makecontext(sch_uctx, &timeout_handler, 0);
+	makecontext(sch_uctx, handle_exit, 0);
 
 	// create main thread
 	tcb_t *main_tcb = new_tcb(0, SCHEDULED, 0);
 	getcontext(&(main_tcb->uctx));
-	scheduler->running = main_tcb;
+	ThreadNode *main_node = new_node(main_tcb);
+	scheduler->running = main_node;
 
 	scheduler->tqueue = new_queue();
 	scheduler->thread_counter = 1;
+
+	signal(SIGALRM, handle_timeout);
+	itimer.it_interval.tv_sec = 0;
+	itimer.it_interval.tv_usec = 20000;
+	itimer.it_value = itimer.it_interval;
+	setitimer(ITIMER_REAL, &itimer, NULL);
 }
 
 
@@ -106,7 +119,7 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 	makecontext(uctx, function, 1, arg);
 
 	scheduler->thread_counter++;
-	enqueue(scheduler->tqueue, tcb);
+	enqueue(scheduler->tqueue, new_node(tcb));
 	
     return 0;
 };
@@ -126,80 +139,64 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 };
 
 static void schedule() {
+	printf("a\n");
+
 	tcb_t *running_tcb = scheduler->running->tcb;
-	
+
 	if (running_tcb->thread_state == FINISHED) {
 		free(running_tcb->uctx.uc_stack.ss_sp);
 		free(running_tcb);
 		free(scheduler->running);
 		scheduler->running = NULL;
+		if (scheduler->tqueue->size == 0) {return;}
+	}
+
+	if (scheduler->tqueue->size > 0) {
+		enqueue(scheduler->tqueue, scheduler->running);
+		scheduler->running = dequeue(scheduler->tqueue);
+	}
+
+	swapcontext(&(running_tcb->uctx), &(scheduler->running->tcb->uctx));
+}
+
+
+void handle_exit() {
+	tcb_t *tcb = scheduler->running->tcb;
+	tcb->thread_state = FINISHED;
+	schedule();
+}
+
+void handle_timeout(int signum) {
+	printf("timeout\n");
+	schedule();
+}
+
+
+void funcA() {
+	int i=0;
+    while (1) {
+		printf("a: %d\n", i);
+		i++;
 	}
 }
 
-
-void timeout_handler(int signum) {
-	tcb_t *fin_thread = scheduler->running;
-	fin_thread->thread_state = FINISHED;
-
-	makecontext(&(scheduler->sch_uctx), schedule, 0);
-	setcontext(&(scheduler->sch_uctx));
+void funcB() {
+	int i=0;
+    while (1) {
+		printf("b: %d\n", i);
+		i++;
+	}
 }
 
+int main() {
 
+	rpthread_create(NULL, NULL, funcA, NULL);
+	rpthread_create(NULL, NULL, funcB, NULL);
 
-/* initialize the mutex lock */
-int rpthread_mutex_init(rpthread_mutex_t *mutex, 
-                          const pthread_mutexattr_t *mutexattr) {
-	//initialize data structures for this mutex
-
-	// YOUR CODE HERE
-	return 0;
-};
-
-/* aquire the mutex lock */
-int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
-        // use the built-in test-and-set atomic function to test the mutex
-        // if the mutex is acquired successfully, enter the critical section
-        // if acquiring mutex fails, push current thread into block list and //  
-        // context switch to the scheduler thread
-
-        // YOUR CODE HERE
-        return 0;
-};
-
-/* release the mutex lock */
-int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
-	// Release mutex and make it available again. 
-	// Put threads in block list to run queue 
-	// so that they could compete for mutex later.
-
-	// YOUR CODE HERE
-	return 0;
-};
-
-
-/* destroy the mutex */
-int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
-	// Deallocate dynamic memory created in rpthread_mutex_init
+	while (1) {
+		printf("main\n");
+	}
 
 	return 0;
-};
-
-
-
-/* Round Robin (RR) scheduling algorithm */
-static void sched_rr() {
-	// Your own implementation of RR
-	// (feel free to modify arguments and return types)
-
-	// YOUR CODE HERE
-}
-
-/* Preemptive MLFQ scheduling algorithm */
-static void sched_mlfq() {
-	// Your own implementation of MLFQ
-	// (feel free to modify arguments and return types)
-
-	// YOUR CODE HERE
 }
 
