@@ -56,7 +56,8 @@ tcb_t *new_tcb(rpthread_t tid, int thread_state, void *(*function)(void *), void
 	tcb->thread_state = thread_state;
 	tcb->thread_priority = 0;
 	tcb->function = function;
-	
+	tcb->done = 0;
+
 	ucontext_t uctx;
 	if (getcontext(&uctx) < 1) {
 		perror("getcontext");
@@ -99,6 +100,7 @@ void init_scheduler(tcb_t* main_tcb) {
 
 	scheduler->running = main_tcb;
 	scheduler->tqueue = new_queue();
+	enqueue(scheduler->tqueue, main_tcb);
 }
 
 int make_id() {
@@ -114,23 +116,62 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr, void *(*function)(
     return 0;
 };
 
-int rpthread_yield() {
+void quantum_end(int signum){
+	getcontext(scheduler->running->context);
+	setcontext(&(scheduler->context));	
+}
 
+static void runschedule() {
+        makecontext(&scheduler->context, (void *)runschedule, 0);
+        
+	struct sigaction sa;
+	memset (&sa, 0, sizeof (sa));
+	sa.sa_handler = &quantum_end;
+	sigaction (SIGPROF, &sa, NULL);
+
+	struct itimerval timer;
+
+	timer.it_interval.tv_usec = 0; 
+	timer.it_interval.tv_sec = 0;
+
+	timer.it_value.tv_usec = TIMESLICE;
+	timer.it_value.tv_sec = 0;
+
+	while (scheduler->tqueue->size != 0) {
+                tcb_t* tcb = dequeue(scheduler->tqueue);
+		scheduler->running = tcb;
+		setitimer(ITIMER_PROF, &timer, NULL);
+                swapcontext(&(scheduler->context), &(tcb->context));
+                if (tcb->done == 0) {
+                        enqueue(scheduler->tqueue, tcb);
+                }
+		else {
+			repthread_exit(NULL);
+		}
+        }
+}
+
+int rpthread_yield(tcb_t* tcb) {
+	runschedule();
+	reset_timer();
 	return 0;
 };
 
 void rpthread_exit(void *value_ptr) {
-
+	if (value_ptr != NULL) {
+		//not sure how to save return value. stack manipulation?
+		clear(scheduler->tqueue->tail->uc_stack.ss_sp);
+		reset_timer();
+	}
 };
 
 int rpthread_join(rpthread_t thread, void **value_ptr) {
-
+	//rpthread_mutex_t *mutex;
+	//swapcontext(this context, threads context);
+	//rpthread_mutex_init(mutex);
+	//rpthread_mutex
 	return 0;
 };
-
-static void schedule() {
-
-}
 
 /* initialize the mutex lock */
 int rpthread_mutex_init(rpthread_mutex_t *mutex, 
@@ -176,7 +217,7 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 static void sched_rr() {
 	// Your own implementation of RR
 	// (feel free to modify arguments and return types)
-		
+	ualarm(TIMESLICE, TIMESLICE);		
 	// YOUR CODE HERE
 }
 

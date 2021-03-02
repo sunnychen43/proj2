@@ -41,6 +41,7 @@ typedef struct thread_control_block {
         int thread_priority;
 	ucontext_t context;
 	void *(*function)(void *);
+	int done;
 } tcb_t;
 
 
@@ -55,7 +56,7 @@ typedef struct ThreadQueue {
 } ThreadQueue;
 
 typedef struct scheduler_t {
-	ucontext_t sch_uctx;
+	ucontext_t context;
 	char stack[SIGSTKSZ];
 	tcb_t *running;
 	ThreadQueue *tqueue;
