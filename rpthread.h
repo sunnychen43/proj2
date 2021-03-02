@@ -24,7 +24,7 @@
 
 #define SSIZE 16384
 
-typedef uint rpthread_t;
+typedef unsigned int rpthread_t;
 
 /* include lib header files that you need here: */
 #include <unistd.h>
@@ -33,6 +33,15 @@ typedef uint rpthread_t;
 #include <stdio.h>
 #include <stdlib.h>
 #include <ucontext.h>
+#include <signal.h>
+
+typedef struct thread_control_block {
+        rpthread_t tid;
+        int thread_state;
+        int thread_priority;
+	ucontext_t context;
+	void *(*function)(void *);
+} tcb_t;
 
 
 typedef struct ThreadNode {
@@ -45,17 +54,9 @@ typedef struct ThreadQueue {
 	int size;
 } ThreadQueue;
 
-
-typedef struct thread_control_block {
-	rpthread_t tid;
-	int thread_state;
-	int thread_priority;
-	ucontext_t uctx;
-} tcb_t; 
-
 typedef struct scheduler_t {
 	ucontext_t sch_uctx;
-	char stack[16384];
+	char stack[SIGSTKSZ];
 	tcb_t *running;
 	ThreadQueue *tqueue;
 } scheduler_t;
