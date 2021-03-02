@@ -97,19 +97,23 @@ void free_tcb(tcb_t *tcb) {
 	free(tcb);
 }
 
-void print_queue(ThreadQueue *queue) {
-	tcb_t *curr = queue->head;
+
+void enable_timer();
+void disable_timer();
+
+static Scheduler *scheduler;
+static struct itimerval itimer, pause_itimer;
+static struct sigaction sa;
+
+void print_queue() {
+	printf("%d->", scheduler->running->tid);
+	tcb_t *curr = scheduler->thread_queue->head;
 	while (curr != NULL) {
 		printf("%d->", curr->tid);
 		curr = curr->next;
 	}
 	printf("\n");
 }
-
-
-
-static Scheduler *scheduler;
-static struct itimerval itimer, pause_itimer, tmp_itimer;
 
 void setup_context(ucontext_t *uc, void (*func)(), ucontext_t *uc_link, void *arg) {
 	getcontext(uc);
@@ -164,19 +168,19 @@ void init_scheduler() {
 	itimer.it_interval.tv_usec = TIMESLICE;
 	itimer.it_value = itimer.it_interval;
 
-	signal(SIGALRM, handle_timeout);
+	memset (&sa, 0, sizeof (sa));
+	sa.sa_handler = &handle_timeout;
+	sigaction(SIGVTALRM, &sa, NULL);
 }
 
 
 int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 					void *(*function)(void *), void *arg) {
-	
 	if (scheduler == NULL) {
-		printf("init scheduler\n");
 		init_scheduler();
 	}
 	else {
-		setitimer(ITIMER_REAL, &pause_itimer, &itimer);
+		disable_timer();
 	}
 
 	*thread = scheduler->ts_count;
@@ -193,8 +197,7 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 	scheduler->ts_arr[*thread] = READY;
 	enqueue(scheduler->thread_queue, tcb);
 
-	setitimer(ITIMER_REAL, &itimer, NULL);
-	
+	enable_timer();
     return 0;
 };
 
@@ -205,7 +208,7 @@ int rpthread_yield() {
 };
 
 void rpthread_exit(void *value_ptr) {
-
+	handle_exit();
 };
 
 int rpthread_join(rpthread_t thread, void **value_ptr) {
@@ -226,8 +229,7 @@ tcb_t *find_next_ready(ThreadQueue *thread_queue) {
 }
 
 static void schedule() {
-	setitimer(ITIMER_REAL, &pause_itimer, &itimer);
-	print_queue(scheduler->thread_queue);
+	disable_timer();
 
 	tcb_t *old_tcb = scheduler->running;
 
@@ -235,15 +237,16 @@ static void schedule() {
 	if (scheduler->ts_arr[old_tcb->tid] == FINISHED) {
 		free_tcb(old_tcb);
 		if (scheduler->thread_queue->size == 0)  // no threads left
-			return;
-		
+			exit(0);
+
 		// load next thread
 		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
 		dequeue_tcb(scheduler->thread_queue, next_thread);
-
+		
 		scheduler->running = next_thread;
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
-		setitimer(ITIMER_REAL, &itimer, NULL);
+
+		enable_timer();
 		setcontext(&(scheduler->running->uctx));
 	}
 
@@ -251,8 +254,8 @@ static void schedule() {
 	else {
 		if (scheduler->thread_queue->size == 0) {  // skip scheduling, resume current thread
 			scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
-			setitimer(ITIMER_REAL, &itimer, NULL);
-			setcontext(&(scheduler->running->uctx));
+			enable_timer();
+			return;
 		}
 		
 		scheduler->ts_arr[scheduler->running->tid] = READY;
@@ -262,10 +265,9 @@ static void schedule() {
 		dequeue_tcb(scheduler->thread_queue, next_thread);
 
 		scheduler->running = next_thread;
-
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
 
-		setitimer(ITIMER_REAL, &itimer, NULL);
+		enable_timer();
 		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
 	}
 }
@@ -274,11 +276,19 @@ static void schedule() {
 void handle_exit() {
 	tcb_t *tcb = scheduler->running;
 	scheduler->ts_arr[tcb->tid] = FINISHED;
+
 	schedule();
 }
 
+void enable_timer() {
+	setitimer(ITIMER_VIRTUAL, &itimer, NULL);
+}
+
+void disable_timer() {
+	setitimer(ITIMER_VIRTUAL, &pause_itimer, NULL);
+}
+
 void handle_timeout(int signum) {
-	printf("timeout %d\n", scheduler->running->tid);
 	schedule();
 }
 

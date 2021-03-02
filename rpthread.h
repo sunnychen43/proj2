@@ -36,6 +36,7 @@
 #include <signal.h>
 #include <ucontext.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef uint8_t rpthread_t;
 
