@@ -243,7 +243,7 @@ int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mute
 	// resize mut_arr as needed
 	if (scheduler->mut_count > scheduler->mut_size) {
 		scheduler->mut_size *= 2;
-		scheduler->mut_arr = (char *) realloc(scheduler->mut_arr, scheduler->mut_size * sizeof(rpthread_mutex_t));
+		scheduler->mut_arr = (rpthread_mutex_t *) realloc(scheduler->mut_arr, scheduler->mut_size * sizeof(rpthread_mutex_t));
 	}
 	
 	return 0;
@@ -398,18 +398,18 @@ void funcB() {
 	}
 }
 
-int main() {
+// int main() {
 
-	rpthread_t a, b;
+// 	rpthread_t a, b;
 	
-	rpthread_create(&a, NULL, funcA, NULL);
-	rpthread_create(&b, NULL, funcB, NULL);
+// 	rpthread_create(&a, NULL, funcA, NULL);
+// 	rpthread_create(&b, NULL, funcB, NULL);
 
-	rpthread_join(a, NULL);
-	rpthread_join(b, NULL);
+// 	rpthread_join(a, NULL);
+// 	rpthread_join(b, NULL);
 
-	printf("done\n");
+// 	printf("done\n");
 
-	return 0;
-}
+// 	return 0;
+// }
 
