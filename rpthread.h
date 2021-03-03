@@ -37,9 +37,18 @@
 #include <ucontext.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 typedef uint8_t rpthread_t;
 
+typedef struct tcb_t {
+        rpthread_t      tid;
+        uint8_t         thread_priority;
+
+        ucontext_t      uctx;
+        struct tcb_t *next;
+
+} tcb_t;
 
 typedef struct ThreadQueue {
 	struct tcb_t *head;
@@ -48,16 +57,11 @@ typedef struct ThreadQueue {
 
 } ThreadQueue;
 
-
-typedef struct tcb_t {
-	rpthread_t 	tid;
-	uint8_t 	thread_priority;
-
-	ucontext_t 	uctx;
-	struct tcb_t *next;
-
-} tcb_t;
-
+typedef struct rpthread_mutex_t {
+	int lock;
+	rpthread_t tid;
+	ThreadQueue *blocked_queue;
+} rpthread_mutex_t;
 
 typedef struct Scheduler {
 	ThreadQueue *thread_queue;
@@ -67,15 +71,13 @@ typedef struct Scheduler {
 	uint8_t		 ts_count;
 	uint8_t		 ts_size;
 
+	rpthread_mutex_t *mut_arr;
+	uint8_t		 mut_count;
+	uint8_t		 mut_size;
+
 	ucontext_t 	 exit_uctx;
 
 } Scheduler;
-
-typedef struct rpthread_mutex_t {
-
-} rpthread_mutex_t;
-
-
 
 ThreadQueue* new_queue();
 void enqueue(ThreadQueue *queue, tcb_t *tcb);
