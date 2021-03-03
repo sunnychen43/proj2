@@ -37,9 +37,11 @@ tcb_t* dequeue(ThreadQueue *queue) {
 	return node;
 }
 
-tcb_t* dequeue_tcb(ThreadQueue *queue, tcb_t *tcb) {
-	if (tcb == queue->head)
-		return dequeue(queue);
+void remove_tcb(ThreadQueue *queue, tcb_t *tcb) {
+	if (tcb == queue->head) {
+		dequeue(queue);
+		return;
+	}
 
 	if (tcb == queue->tail) {
 		tcb_t *prev = NULL;
@@ -52,28 +54,23 @@ tcb_t* dequeue_tcb(ThreadQueue *queue, tcb_t *tcb) {
 		prev->next = NULL;
 		queue->tail = prev;
 		queue->size--;
-		return tcb;
+		return;
 	}
 
 	tcb_t *prev = queue->head;
 	tcb_t *curr = queue->head->next;
-
 	while (curr != NULL) {
 		if (curr == tcb) {
-			prev->next = NULL;
+			prev->next = curr->next;
 			curr->next = NULL;
-
-			queue->tail->next = queue->head;
-			queue->head = curr->next;
-			queue->tail = prev;
 			queue->size--;
-			return curr;
+			return;
 		}
 		prev = curr;
 		curr = curr->next;
 	}
 	
-	return NULL;
+	return;
 }
 
 tcb_t* peek(ThreadQueue *queue) {
@@ -242,7 +239,7 @@ static void schedule() {
 
 		// load next thread
 		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
-		dequeue_tcb(scheduler->thread_queue, next_thread);
+		remove_tcb(scheduler->thread_queue, next_thread);
 		
 		scheduler->running = next_thread;
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
@@ -263,7 +260,7 @@ static void schedule() {
 		enqueue(scheduler->thread_queue, scheduler->running);
 
 		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
-		dequeue_tcb(scheduler->thread_queue, next_thread);
+		remove_tcb(scheduler->thread_queue, next_thread);
 
 		scheduler->running = next_thread;
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
