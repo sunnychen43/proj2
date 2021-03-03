@@ -161,7 +161,7 @@ void init_scheduler() {
 	scheduler->ts_size = 32;
 
 	// setup exit context
-	setup_context(&(scheduler->exit_uctx), handle_exit, NULL, NULL);
+	setup_context(&(scheduler->exit_uctx), rpthread_exit, NULL, NULL);
 
 	//setup itimer
 	itimer.it_interval.tv_sec = 0;
@@ -208,7 +208,8 @@ int rpthread_yield() {
 };
 
 void rpthread_exit(void *value_ptr) {
-	handle_exit();
+	scheduler->ts_arr[scheduler->running->tid] = FINISHED;
+	schedule();
 };
 
 int rpthread_join(rpthread_t thread, void **value_ptr) {
@@ -272,14 +273,6 @@ static void schedule() {
 	}
 }
 
-
-void handle_exit() {
-	tcb_t *tcb = scheduler->running;
-	scheduler->ts_arr[tcb->tid] = FINISHED;
-
-	schedule();
-}
-
 void enable_timer() {
 	setitimer(ITIMER_VIRTUAL, &itimer, NULL);
 }
@@ -301,7 +294,7 @@ void funcA() {
 	// }
 
 	for (int i=0; i < 100000; i++) {
-		printf("a: %d\n", i);
+		// printf("a: %d\n", i);
 	}
 }
 
@@ -313,7 +306,7 @@ void funcB() {
 	// }
 
 	for (int i=0; i < 100000; i++) {
-		printf("b: %d\n", i);
+		// printf("b: %d\n", i);
 	}
 }
 
