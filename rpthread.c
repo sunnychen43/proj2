@@ -159,9 +159,6 @@ void init_scheduler() {
 
 	// setup mutex
 	// setup thread info
-	scheduler->mut_arr = (rpthread_mutex_t *) malloc(16 * sizeof(rpthread_mutex_t));
-	scheduler->mut_count = 0;
-	scheduler->mut_size = 16;
 
 	// setup exit context
 	setup_context(&(scheduler->exit_uctx), handle_exit, NULL, NULL);
@@ -234,17 +231,9 @@ tcb_t *find_next_ready(ThreadQueue *thread_queue) {
 /* initialize the mutex lock */
 int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr) {
 	//initialize data structures for this mutex
-	mutex = &(scheduler->mut_arr[scheduler->mut_count]);
 	mutex->tid = scheduler->running->tid;
 	mutex->lock = 0;
 	mutex->blocked_queue = new_queue();
-	scheduler->mut_count++;
-
-	// resize mut_arr as needed
-	if (scheduler->mut_count > scheduler->mut_size) {
-		scheduler->mut_size *= 2;
-		scheduler->mut_arr = (rpthread_mutex_t *) realloc(scheduler->mut_arr, scheduler->mut_size * sizeof(rpthread_mutex_t));
-	}
 	
 	return 0;
 };
@@ -256,6 +245,9 @@ int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
 		scheduler->ts_arr[scheduler->running->tid] = BLOCKED;
 		enqueue(mutex->blocked_queue, scheduler->running);
 		schedule();
+	}
+	else {
+		mutex->tid = scheduler->running->tid;
 	}
 	// use the built-in test-and-set atomic function to test the mutex
 	// if the mutex is acquired successfully, enter the critical section
@@ -303,9 +295,6 @@ static void schedule() {
 		free_tcb(old_tcb);
 		if (scheduler->thread_queue->size == 0) { // no threads left
 			free(scheduler->thread_queue); //more freeing required here
-			for (int i = 0; i < scheduler->mut_size; i++) {
-				free(&(scheduler->mut_arr[i]));
-			}
 			exit(0);
 		}
 
@@ -348,6 +337,7 @@ static void schedule() {
 		scheduler->running = next_thread;
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
 
+		printf("a\n");
 		enable_timer();
 		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
 	}
@@ -381,7 +371,7 @@ void funcA() {
 	// 	i++;
 	// }
 
-	for (int i=0; i < 100000; i++) {
+	for (int i=0; i < 10; i++) {
 		printf("a: %d\n", i);
 	}
 }
@@ -393,7 +383,7 @@ void funcB() {
 	// 	i++;
 	// }
 
-	for (int i=0; i < 100000; i++) {
+	for (int i=0; i < 10; i++) {
 		printf("b: %d\n", i);
 	}
 }
