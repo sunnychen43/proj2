@@ -165,7 +165,7 @@ void init_scheduler() {
 
 	//setup itimer
 	itimer.it_interval.tv_sec = 0;
-	itimer.it_interval.tv_usec = TIMESLICE;
+	itimer.it_interval.tv_usec = TIMESLICE*1000;
 	itimer.it_value = itimer.it_interval;
 
 	memset (&sa, 0, sizeof (sa));
@@ -230,19 +230,15 @@ tcb_t *find_next_ready(ThreadQueue *thread_queue) {
 
 /* initialize the mutex lock */
 int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr) {
-	disable_timer();
 	//initialize data structures for this mutex
-	mutex->tid = scheduler->running->tid;
+	mutex->tid = -1;
 	mutex->lock = 0;
 	mutex->blocked_queue = new_queue();
-	
-	enable_timer();
 	return 0;
 };
 
 /* aquire the mutex lock */
 int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
-	disable_timer();
 	unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 0, 1);
 	if (result != 0) {
 		scheduler->ts_arr[scheduler->running->tid] = BLOCKED;
@@ -256,13 +252,11 @@ int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
 	// if the mutex is acquired successfully, enter the critical section
 	// if acquiring mutex fails, push current thread into block list and //  
 	// context switch to the scheduler thread
-	enable_timer();
 	return 0;
 };
 
 /* release the mutex lock */
 int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
-	disable_timer();
 	if (mutex->tid == scheduler->running->tid) {
 		unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 1, 0);
 		if (result == 1) {
@@ -277,7 +271,6 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 	else {
 		printf("Thread is missing mutex key\n");
 	}
-	enable_timer();
 	// Release mutex and make it available again. 
 	// Put threads in block list to run queue 
 	// so that they could compete for mutex later.
@@ -287,10 +280,7 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 
 /* destroy the mutex */
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
-	disable_timer();
 	free(mutex->blocked_queue);
-	free(mutex);
-	enable_timer();
 	return 0;
 };
 
@@ -371,6 +361,8 @@ void handle_timeout(int signum) {
 	schedule();
 }
 
+rpthread_mutex_t mutex;
+int i=0;
 
 void funcA() {
 	// int i=0;
@@ -379,8 +371,11 @@ void funcA() {
 	// 	i++;
 	// }
 
-	for (int i=0; i < 100000; i++) {
+	while (i < 100000) {
+		rpthread_mutex_lock(&mutex);
+		i++;
 		printf("a: %d\n", i);
+		rpthread_mutex_unlock(&mutex);
 	}
 }
 
@@ -391,23 +386,28 @@ void funcB() {
 	// 	i++;
 	// }
 
-	for (int i=0; i < 100000; i++) {
+	while (i < 100000) {
+		rpthread_mutex_lock(&mutex);
+		i++;
 		printf("b: %d\n", i);
+		rpthread_mutex_unlock(&mutex);
 	}
 }
 
-int main() {
+// int main() {
 
-	rpthread_t a, b;
+// 	rpthread_t a, b;
+// 	rpthread_mutex_init(&mutex, NULL);
+// 	printf("a\n");
 	
-	rpthread_create(&a, NULL, funcA, NULL);
-	rpthread_create(&b, NULL, funcB, NULL);
+// 	rpthread_create(&a, NULL, funcA, NULL);
+// 	rpthread_create(&b, NULL, funcB, NULL);
 
-	rpthread_join(a, NULL);
-	rpthread_join(b, NULL);
+// 	rpthread_join(a, NULL);
+// 	rpthread_join(b, NULL);
 
-	printf("done\n");
+// 	printf("done\n");
 
-	return 0;
-}
+// 	return 0;
+// }
 

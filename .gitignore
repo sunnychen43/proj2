@@ -1,5 +1,3 @@
-
-
 *
 !/**/
 !*.*
@@ -13,3 +11,5 @@ test.c
 
 benchmarks/
 !Makefile
+
+*.a
