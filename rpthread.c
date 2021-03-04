@@ -230,16 +230,19 @@ tcb_t *find_next_ready(ThreadQueue *thread_queue) {
 
 /* initialize the mutex lock */
 int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr) {
+	disable_timer();
 	//initialize data structures for this mutex
 	mutex->tid = scheduler->running->tid;
 	mutex->lock = 0;
 	mutex->blocked_queue = new_queue();
 	
+	enable_timer();
 	return 0;
 };
 
 /* aquire the mutex lock */
 int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
+	disable_timer();
 	unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 0, 1);
 	if (result != 0) {
 		scheduler->ts_arr[scheduler->running->tid] = BLOCKED;
@@ -253,11 +256,13 @@ int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
 	// if the mutex is acquired successfully, enter the critical section
 	// if acquiring mutex fails, push current thread into block list and //  
 	// context switch to the scheduler thread
+	enable_timer();
 	return 0;
 };
 
 /* release the mutex lock */
 int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
+	disable_timer();
 	if (mutex->tid == scheduler->running->tid) {
 		unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 1, 0);
 		if (result == 1) {
@@ -272,6 +277,7 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 	else {
 		printf("Thread is missing mutex key\n");
 	}
+	enable_timer();
 	// Release mutex and make it available again. 
 	// Put threads in block list to run queue 
 	// so that they could compete for mutex later.
@@ -281,7 +287,10 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 
 /* destroy the mutex */
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
+	disable_timer();
 	free(mutex->blocked_queue);
+	free(mutex);
+	enable_timer();
 	return 0;
 };
 
