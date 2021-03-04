@@ -327,7 +327,7 @@ static void schedule() {
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
 
 		enable_timer();
-		setcontext(&(scheduler->running->uctx));
+		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
 	}
 	// called from handle_timeout
 	else {
@@ -346,7 +346,6 @@ static void schedule() {
 		scheduler->running = next_thread;
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
 
-		printf("a\n");
 		enable_timer();
 		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
 	}
