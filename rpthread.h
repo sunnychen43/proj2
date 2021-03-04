@@ -58,7 +58,7 @@ typedef struct ThreadQueue {
 } ThreadQueue;
 
 typedef struct rpthread_mutex_t {
-	int lock;
+	unsigned char lock;
 	rpthread_t tid;
 	ThreadQueue *blocked_queue;
 } rpthread_mutex_t;

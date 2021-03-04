@@ -251,7 +251,7 @@ int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mute
 
 /* aquire the mutex lock */
 int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
-	int result = test_and_set(mutex->lock, 0, 1);
+	unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 0, 1);
 	if (result != 0) {
 		scheduler->ts_arr[scheduler->running->tid] = BLOCKED;
 		enqueue(mutex->blocked_queue, scheduler->running);
@@ -267,7 +267,7 @@ int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
 /* release the mutex lock */
 int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 	if (mutex->tid == scheduler->running->tid) {
-		int result = test_and_set(mutex->lock, 1, 0);
+		unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 1, 0);
 		if (result == 1) {
 			tcb_t* tcb;
 			while (mutex->blocked_queue->size != 0) {
@@ -398,18 +398,18 @@ void funcB() {
 	}
 }
 
-// int main() {
+int main() {
 
-// 	rpthread_t a, b;
+	rpthread_t a, b;
 	
-// 	rpthread_create(&a, NULL, funcA, NULL);
-// 	rpthread_create(&b, NULL, funcB, NULL);
+	rpthread_create(&a, NULL, funcA, NULL);
+	rpthread_create(&b, NULL, funcB, NULL);
 
-// 	rpthread_join(a, NULL);
-// 	rpthread_join(b, NULL);
+	rpthread_join(a, NULL);
+	rpthread_join(b, NULL);
 
-// 	printf("done\n");
+	printf("done\n");
 
-// 	return 0;
-// }
+	return 0;
+}
 
