@@ -101,6 +101,7 @@ void disable_timer();
 static Scheduler *scheduler;
 static struct itimerval itimer, pause_itimer;
 static struct sigaction sa;
+static bool enabled;
 
 void print_queue() {
 	printf("%d->", scheduler->running->tid);
@@ -170,7 +171,8 @@ void init_scheduler() {
 
 	memset (&sa, 0, sizeof (sa));
 	sa.sa_handler = &handle_timeout;
-	sigaction(SIGVTALRM, &sa, NULL);
+	sigaction(SIGPROF, &sa, NULL);
+	setitimer(ITIMER_PROF, &itimer, NULL);
 }
 
 
@@ -239,6 +241,7 @@ int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mute
 
 /* aquire the mutex lock */
 int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
+	disable_timer();
 	unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 0, 1);
 	if (result != 0) {
 		scheduler->ts_arr[scheduler->running->tid] = BLOCKED;
@@ -252,11 +255,13 @@ int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
 	// if the mutex is acquired successfully, enter the critical section
 	// if acquiring mutex fails, push current thread into block list and //  
 	// context switch to the scheduler thread
+	enable_timer();
 	return 0;
 };
 
 /* release the mutex lock */
 int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
+	disable_timer();
 	if (mutex->tid == scheduler->running->tid) {
 		unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 1, 0);
 		if (result == 1) {
@@ -268,12 +273,10 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 			}
 		}
 	}
-	else {
-		printf("Thread is missing mutex key\n");
-	}
 	// Release mutex and make it available again. 
 	// Put threads in block list to run queue 
 	// so that they could compete for mutex later.
+	enable_timer();
 	return 0;
 };
 
@@ -286,9 +289,8 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 
 static void schedule() {
 	disable_timer();
-
 	tcb_t *old_tcb = scheduler->running;
-
+	
 	// called from handle_exit
 	if (scheduler->ts_arr[old_tcb->tid] == FINISHED) {
 		free_tcb(old_tcb);
@@ -315,7 +317,6 @@ static void schedule() {
 		
 		scheduler->running = next_thread;
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
-
 		enable_timer();
 		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
 	}
@@ -335,7 +336,6 @@ static void schedule() {
 
 		scheduler->running = next_thread;
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
-
 		enable_timer();
 		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
 	}
@@ -350,15 +350,19 @@ void handle_exit() {
 }
 
 void enable_timer() {
-	setitimer(ITIMER_VIRTUAL, &itimer, NULL);
+	// setitimer(ITIMER_PROF, &itimer, NULL);
+	enabled = true;
 }
 
 void disable_timer() {
-	setitimer(ITIMER_VIRTUAL, &pause_itimer, NULL);
+	// setitimer(ITIMER_PROF, &pause_itimer, NULL);
+	enabled = false;
 }
 
 void handle_timeout(int signum) {
-	schedule();
+	if (enabled) {
+		schedule();
+	}
 }
 
 rpthread_mutex_t mutex;

@@ -13,3 +13,4 @@ benchmarks/
 !Makefile
 
 *.a
+*.o
