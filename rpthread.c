@@ -291,7 +291,7 @@ void funcA() {
 	// }
 
 	for (int i=0; i < 100000; i++) {
-		// printf("a: %d\n", i);
+		printf("a: %d\n", i);
 	}
 }
 
@@ -303,7 +303,7 @@ void funcB() {
 	// }
 
 	for (int i=0; i < 100000; i++) {
-		// printf("b: %d\n", i);
+		printf("b: %d\n", i);
 	}
 }
 
