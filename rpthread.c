@@ -159,7 +159,6 @@ void init_scheduler() {
 
 	// setup mutex
 	// setup thread info
-	scheduler->mut_arr = (rpthread_mutex_t *) malloc(16 * sizeof(rpthread_mutex_t));
 	scheduler->mut_count = 0;
 	scheduler->mut_size = 16;
 
@@ -233,39 +232,38 @@ tcb_t *find_next_ready(ThreadQueue *thread_queue) {
 
 /* initialize the mutex lock */
 int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr) {
+	disable_timer();
 	//initialize data structures for this mutex
-	mutex = &(scheduler->mut_arr[scheduler->mut_count]);
-	mutex->tid = scheduler->running->tid;
+	mutex->tid = -1;
 	mutex->lock = 0;
 	mutex->blocked_queue = new_queue();
 	scheduler->mut_count++;
 
-	// resize mut_arr as needed
-	if (scheduler->mut_count > scheduler->mut_size) {
-		scheduler->mut_size *= 2;
-		scheduler->mut_arr = (rpthread_mutex_t *) realloc(scheduler->mut_arr, scheduler->mut_size * sizeof(rpthread_mutex_t));
-	}
-	
+	enable_timer();
 	return 0;
 };
 
 /* aquire the mutex lock */
 int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
+	disable_timer();
 	unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 0, 1);
 	if (result != 0) {
 		scheduler->ts_arr[scheduler->running->tid] = BLOCKED;
 		enqueue(mutex->blocked_queue, scheduler->running);
 		schedule();
 	}
+	mutex->tid = scheduler->running->tid;
 	// use the built-in test-and-set atomic function to test the mutex
 	// if the mutex is acquired successfully, enter the critical section
 	// if acquiring mutex fails, push current thread into block list and //  
 	// context switch to the scheduler thread
+	enable_timer();
 	return 0;
 };
 
 /* release the mutex lock */
 int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
+	disable_timer();
 	if (mutex->tid == scheduler->running->tid) {
 		unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 1, 0);
 		if (result == 1) {
@@ -280,6 +278,7 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 	else {
 		printf("Thread is missing mutex key\n");
 	}
+	enable_timer();
 	// Release mutex and make it available again. 
 	// Put threads in block list to run queue 
 	// so that they could compete for mutex later.
@@ -289,7 +288,10 @@ int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 
 /* destroy the mutex */
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
+	disable_timer();
 	free(mutex->blocked_queue);
+	free(mutex);
+	enable_timer();
 	return 0;
 };
 
@@ -303,9 +305,6 @@ static void schedule() {
 		free_tcb(old_tcb);
 		if (scheduler->thread_queue->size == 0) { // no threads left
 			free(scheduler->thread_queue); //more freeing required here
-			for (int i = 0; i < scheduler->mut_size; i++) {
-				free(&(scheduler->mut_arr[i]));
-			}
 			exit(0);
 		}
 

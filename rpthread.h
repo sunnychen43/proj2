@@ -71,7 +71,6 @@ typedef struct Scheduler {
 	uint8_t		 ts_count;
 	uint8_t		 ts_size;
 
-	rpthread_mutex_t *mut_arr;
 	uint8_t		 mut_count;
 	uint8_t		 mut_size;
 
