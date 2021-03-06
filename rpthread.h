@@ -24,8 +24,6 @@
 #define FINISHED 3
 #define YIELD 4
 
-#define SS_SIZE 16384
-
 /* include lib header files that you need here: */
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -38,6 +36,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+
+#define SS_SIZE SIGSTKSZ
 
 typedef uint8_t rpthread_t;
 

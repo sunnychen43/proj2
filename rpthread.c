@@ -234,57 +234,27 @@ tcb_t *find_next_ready(ThreadQueue *thread_queue) {
 /* initialize the mutex lock */
 int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr) {
 	//initialize data structures for this mutex
-	mutex->tid = -1;
 	mutex->lock = 0;
-	mutex->blocked_queue = new_queue();
 	return 0;
 };
 
 /* aquire the mutex lock */
 int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
-	disable_timer();
-	unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 0, 1);
-	if (result != 0) {
-		scheduler->ts_arr[scheduler->running->tid] = BLOCKED;
-		enqueue(mutex->blocked_queue, scheduler->running);
-		schedule();
+	while (__sync_lock_test_and_set(&(mutex->lock), 1) == 1) {
+		rpthread_yield();
 	}
-	else {
-		mutex->tid = scheduler->running->tid;
-	}
-	// use the built-in test-and-set atomic function to test the mutex
-	// if the mutex is acquired successfully, enter the critical section
-	// if acquiring mutex fails, push current thread into block list and //  
-	// context switch to the scheduler thread
-	enable_timer();
 	return 0;
 };
 
 /* release the mutex lock */
 int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
-	disable_timer();
-	if (mutex->tid == scheduler->running->tid) {
-		unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 1, 0);
-		if (result == 1) {
-			tcb_t* tcb;
-			while (mutex->blocked_queue->size != 0) {
-				tcb = dequeue(mutex->blocked_queue);
-				scheduler->ts_arr[tcb->tid] = READY;
-				enqueue(scheduler->thread_queue, tcb);
-			}
-		}
-	}
-	// Release mutex and make it available again. 
-	// Put threads in block list to run queue 
-	// so that they could compete for mutex later.
-	enable_timer();
+	__sync_lock_test_and_set(&(mutex->lock), 0);
 	return 0;
 };
 
 
 /* destroy the mutex */
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
-	free(mutex->blocked_queue);
 	return 0;
 };
 
@@ -311,16 +281,16 @@ static void schedule() {
 		setcontext(&(scheduler->running->uctx));
 	}
 	// called from mutex_lock
-	if (scheduler->ts_arr[old_tcb->tid] == BLOCKED) {
-		// load next thread
-		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
-		remove_tcb(scheduler->thread_queue, next_thread);
+	// if (scheduler->ts_arr[old_tcb->tid] == BLOCKED) {
+	// 	// load next thread
+	// 	tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
+	// 	remove_tcb(scheduler->thread_queue, next_thread);
 		
-		scheduler->running = next_thread;
-		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
-		enable_timer();
-		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
-	}
+	// 	scheduler->running = next_thread;
+	// 	scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+	// 	enable_timer();
+	// 	swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
+	// }
 	// called from handle_timeout
 	else {
 		if (scheduler->thread_queue->size == 0) {  // skip scheduling, resume current thread
