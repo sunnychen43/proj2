@@ -41,6 +41,14 @@
 
 typedef uint8_t rpthread_t;
 
+typedef struct tcb_t {
+        rpthread_t      tid;
+        uint8_t         thread_priority;
+
+        ucontext_t      uctx;
+        struct tcb_t *next;
+
+} tcb_t;
 
 typedef struct ThreadQueue {
 	struct tcb_t *head;
@@ -49,16 +57,11 @@ typedef struct ThreadQueue {
 
 } ThreadQueue;
 
-
-typedef struct tcb_t {
-	rpthread_t 	tid;
-	uint8_t 	thread_priority;
-
-	ucontext_t 	uctx;
-	struct tcb_t *next;
-
-} tcb_t;
-
+typedef struct rpthread_mutex_t {
+	unsigned char lock;
+	rpthread_t tid;
+	ThreadQueue *blocked_queue;
+} rpthread_mutex_t;
 
 typedef struct Scheduler {
 	ThreadQueue *thread_queue;
@@ -71,12 +74,6 @@ typedef struct Scheduler {
 	ucontext_t 	 exit_uctx;
 
 } Scheduler;
-
-typedef struct rpthread_mutex_t {
-
-} rpthread_mutex_t;
-
-
 
 ThreadQueue* new_queue();
 void enqueue(ThreadQueue *queue, tcb_t *tcb);

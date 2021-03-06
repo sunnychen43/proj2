@@ -8,3 +8,9 @@ test.c
 *.json
 .gdb_history
 *.out
+
+benchmarks/
+!Makefile
+
+*.a
+*.o

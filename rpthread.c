@@ -101,6 +101,7 @@ void disable_timer();
 static Scheduler *scheduler;
 static struct itimerval itimer, pause_itimer;
 static struct sigaction sa;
+static bool enabled;
 
 void print_queue() {
 	printf("%d->", scheduler->running->tid);
@@ -157,17 +158,21 @@ void init_scheduler() {
 	scheduler->ts_count = 1;
 	scheduler->ts_size = 32;
 
+	// setup mutex
+	// setup thread info
+
 	// setup exit context
 	setup_context(&(scheduler->exit_uctx), rpthread_exit, NULL, NULL);
 
 	//setup itimer
 	itimer.it_interval.tv_sec = 0;
-	itimer.it_interval.tv_usec = TIMESLICE;
+	itimer.it_interval.tv_usec = TIMESLICE*1000;
 	itimer.it_value = itimer.it_interval;
 
 	memset (&sa, 0, sizeof (sa));
 	sa.sa_handler = &handle_timeout;
-	sigaction(SIGVTALRM, &sa, NULL);
+	sigaction(SIGPROF, &sa, NULL);
+	setitimer(ITIMER_PROF, &itimer, NULL);
 }
 
 
@@ -226,16 +231,74 @@ tcb_t *find_next_ready(ThreadQueue *thread_queue) {
 	return NULL;
 }
 
+/* initialize the mutex lock */
+int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr) {
+	//initialize data structures for this mutex
+	mutex->tid = -1;
+	mutex->lock = 0;
+	mutex->blocked_queue = new_queue();
+	return 0;
+};
+
+/* aquire the mutex lock */
+int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
+	disable_timer();
+	unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 0, 1);
+	if (result != 0) {
+		scheduler->ts_arr[scheduler->running->tid] = BLOCKED;
+		enqueue(mutex->blocked_queue, scheduler->running);
+		schedule();
+	}
+	else {
+		mutex->tid = scheduler->running->tid;
+	}
+	// use the built-in test-and-set atomic function to test the mutex
+	// if the mutex is acquired successfully, enter the critical section
+	// if acquiring mutex fails, push current thread into block list and //  
+	// context switch to the scheduler thread
+	enable_timer();
+	return 0;
+};
+
+/* release the mutex lock */
+int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
+	disable_timer();
+	if (mutex->tid == scheduler->running->tid) {
+		unsigned char result = __sync_val_compare_and_swap(&(mutex->lock), 1, 0);
+		if (result == 1) {
+			tcb_t* tcb;
+			while (mutex->blocked_queue->size != 0) {
+				tcb = dequeue(mutex->blocked_queue);
+				scheduler->ts_arr[tcb->tid] = READY;
+				enqueue(scheduler->thread_queue, tcb);
+			}
+		}
+	}
+	// Release mutex and make it available again. 
+	// Put threads in block list to run queue 
+	// so that they could compete for mutex later.
+	enable_timer();
+	return 0;
+};
+
+
+/* destroy the mutex */
+int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
+	free(mutex->blocked_queue);
+	return 0;
+};
+
 static void schedule() {
 	disable_timer();
-
 	tcb_t *old_tcb = scheduler->running;
-
+	
 	// called from handle_exit
 	if (scheduler->ts_arr[old_tcb->tid] == FINISHED) {
 		free_tcb(old_tcb);
-		if (scheduler->thread_queue->size == 0)  // no threads left
+		if (scheduler->thread_queue->size == 0) { // no threads left
+			free(scheduler->thread_queue); //more freeing required here
 			exit(0);
+		}
 
 		// load next thread
 		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
@@ -247,7 +310,17 @@ static void schedule() {
 		enable_timer();
 		setcontext(&(scheduler->running->uctx));
 	}
-
+	// called from mutex_lock
+	if (scheduler->ts_arr[old_tcb->tid] == BLOCKED) {
+		// load next thread
+		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
+		remove_tcb(scheduler->thread_queue, next_thread);
+		
+		scheduler->running = next_thread;
+		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+		enable_timer();
+		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
+	}
 	// called from handle_timeout
 	else {
 		if (scheduler->thread_queue->size == 0) {  // skip scheduling, resume current thread
@@ -264,24 +337,29 @@ static void schedule() {
 
 		scheduler->running = next_thread;
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
-
 		enable_timer();
 		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
 	}
 }
 
 void enable_timer() {
-	setitimer(ITIMER_VIRTUAL, &itimer, NULL);
+	// setitimer(ITIMER_PROF, &itimer, NULL);
+	enabled = true;
 }
 
 void disable_timer() {
-	setitimer(ITIMER_VIRTUAL, &pause_itimer, NULL);
+	// setitimer(ITIMER_PROF, &pause_itimer, NULL);
+	enabled = false;
 }
 
 void handle_timeout(int signum) {
-	schedule();
+	if (enabled) {
+		schedule();
+	}
 }
 
+rpthread_mutex_t mutex;
+int i=0;
 
 void funcA() {
 	// int i=0;
@@ -290,8 +368,11 @@ void funcA() {
 	// 	i++;
 	// }
 
-	for (int i=0; i < 100000; i++) {
+	while (i < 100000) {
+		rpthread_mutex_lock(&mutex);
+		i++;
 		printf("a: %d\n", i);
+		rpthread_mutex_unlock(&mutex);
 	}
 }
 
@@ -302,23 +383,28 @@ void funcB() {
 	// 	i++;
 	// }
 
-	for (int i=0; i < 100000; i++) {
+	while (i < 100000) {
+		rpthread_mutex_lock(&mutex);
+		i++;
 		printf("b: %d\n", i);
+		rpthread_mutex_unlock(&mutex);
 	}
 }
 
-int main() {
+// int main() {
 
-	rpthread_t a, b;
+// 	rpthread_t a, b;
+// 	rpthread_mutex_init(&mutex, NULL);
+// 	printf("a\n");
 	
-	rpthread_create(&a, NULL, funcA, NULL);
-	rpthread_create(&b, NULL, funcB, NULL);
+// 	rpthread_create(&a, NULL, funcA, NULL);
+// 	rpthread_create(&b, NULL, funcB, NULL);
 
-	rpthread_join(a, NULL);
-	rpthread_join(b, NULL);
+// 	rpthread_join(a, NULL);
+// 	rpthread_join(b, NULL);
 
-	printf("done\n");
+// 	printf("done\n");
 
-	return 0;
-}
+// 	return 0;
+// }
 
