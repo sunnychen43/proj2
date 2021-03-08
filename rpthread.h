@@ -39,7 +39,7 @@
 #include "threadqueue.h"
 
 #define SS_SIZE SIGSTKSZ
-#define MLFQ_LEVELS 1
+#define MLFQ_LEVELS 8
 
 typedef uint8_t rpthread_t;
 

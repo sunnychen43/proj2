@@ -20,15 +20,15 @@ subprocess.run(['make'])
 subprocess.run(['./genRecord.sh'])
 
 external_cal_test = subprocess.Popen(['./external_cal', '4'], stdout=subprocess.PIPE)
-# parallel_cal_test = subprocess.Popen(['./parallel_cal', '6'], stdout=subprocess.PIPE)
-# vector_multiply_test = subprocess.Popen(['./vector_multiply', '6'], stdout=subprocess.PIPE)
+parallel_cal_test = subprocess.Popen(['./parallel_cal', '6'], stdout=subprocess.PIPE)
+vector_multiply_test = subprocess.Popen(['./vector_multiply', '6'], stdout=subprocess.PIPE)
 
 print('')
-# print('./vector_multiply')
-# print(vector_multiply_test.communicate()[0].decode())
+print('./vector_multiply')
+print(vector_multiply_test.communicate()[0].decode())
 
 print('./external_cal')
 print(external_cal_test.communicate()[0].decode())
 
-# print('./parallel_cal')
-# print(parallel_cal_test.communicate()[0].decode())
+print('./parallel_cal')
+print(parallel_cal_test.communicate()[0].decode())
