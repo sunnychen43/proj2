@@ -36,35 +36,20 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include "threadqueue.h"
 
 #define SS_SIZE SIGSTKSZ
+#define MLFQ_LEVELS 4
 
 typedef uint8_t rpthread_t;
-
-typedef struct tcb_t {
-        rpthread_t      tid;
-        uint8_t         thread_priority;
-
-        ucontext_t      uctx;
-        struct tcb_t *next;
-
-} tcb_t;
-
-typedef struct ThreadQueue {
-	struct tcb_t *head;
-	struct tcb_t *tail;
-	int size;
-
-} ThreadQueue;
 
 typedef struct rpthread_mutex_t {
 	unsigned char lock;
 	rpthread_t tid;
-	ThreadQueue *blocked_queue;
 } rpthread_mutex_t;
 
 typedef struct Scheduler {
-	ThreadQueue *thread_queue;
+	ThreadQueue *thread_queues[MLFQ_LEVELS];
 	tcb_t 	   	*running;
 
 	char		*ts_arr;
@@ -75,11 +60,6 @@ typedef struct Scheduler {
 
 } Scheduler;
 
-ThreadQueue* new_queue();
-void enqueue(ThreadQueue *queue, tcb_t *tcb);
-tcb_t* dequeue(ThreadQueue *queue);
-tcb_t* peek(ThreadQueue *queue);
-tcb_t* new_node(tcb_t *tcb);
 
 int rpthread_create(rpthread_t *thread, pthread_attr_t *attr, void *(*function)(void *), void *arg);
 int rpthread_yield();
@@ -90,9 +70,6 @@ int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mute
 int rpthread_mutex_lock(rpthread_mutex_t *mutex);
 int rpthread_mutex_unlock(rpthread_mutex_t *mutex);
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex);
-
-void handle_timeout(int signum);
-void handle_exit();
 
 
 #ifdef USE_RTHREAD

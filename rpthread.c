@@ -3,115 +3,16 @@
 static void schedule();
 
 /********** Queue Implementation **********/
-ThreadQueue* new_queue() {
-	ThreadQueue *queue = (ThreadQueue *) malloc(sizeof(*queue));
-	queue->head = NULL;
-	queue->tail = NULL;
-	queue->size = 0;
-	return queue;
-}
 
-void enqueue(ThreadQueue *queue, tcb_t *node) {
-	if (queue->tail == NULL) {
-		queue->head = node;
-	}
-	else {
-		queue->tail->next = node;
-	}
-	queue->tail = node;
-	node->next = NULL;
-	queue->size++;
-}
-
-tcb_t* dequeue(ThreadQueue *queue) {
-	if (queue->size == 0) {
-		return NULL;
-	}
-	tcb_t *node = queue->head;
-	if (node->next == NULL) {
-		queue->tail = NULL;
-	}
-	queue->head = node->next;
-	queue->size--;
-
-	return node;
-}
-
-void remove_tcb(ThreadQueue *queue, tcb_t *tcb) {
-	if (tcb == queue->head) {
-		dequeue(queue);
-		return;
-	}
-
-	if (tcb == queue->tail) {
-		tcb_t *prev = NULL;
-		tcb_t *curr = queue->head;
-		while (curr->next != NULL) {
-			prev = curr;
-			curr = curr->next;
-		}
-
-		prev->next = NULL;
-		queue->tail = prev;
-		queue->size--;
-		return;
-	}
-
-	tcb_t *prev = queue->head;
-	tcb_t *curr = queue->head->next;
-	while (curr != NULL) {
-		if (curr == tcb) {
-			prev->next = curr->next;
-			curr->next = NULL;
-			queue->size--;
-			return;
-		}
-		prev = curr;
-		curr = curr->next;
-	}
-	
-	return;
-}
-
-tcb_t* peek(ThreadQueue *queue) {
-	if (queue->size == 0) {
-		return NULL;
-	}
-	return queue->head;
-}
-
-
-tcb_t* new_tcb(rpthread_t tid, int thread_priority) {
-	tcb_t *tcb = (tcb_t *) malloc(sizeof(*tcb));
-	tcb->tid = tid;
-	tcb->thread_priority = thread_priority;
-	tcb->next = NULL;
-	return tcb;
-}
-
-void free_tcb(tcb_t *tcb) {
-	free(tcb->uctx.uc_stack.ss_sp);
-	free(tcb);
-}
-
-
+void handle_timeout(int signum);
+void handle_exit();
 void enable_timer();
 void disable_timer();
 
 static Scheduler *scheduler;
-static struct itimerval itimer, pause_itimer;
+static struct itimerval itimer;
 static struct sigaction sa;
 static bool enabled;
-
-void print_queue() {
-	printf("%d->", scheduler->running->tid);
-	tcb_t *curr = scheduler->thread_queue->head;
-	while (curr != NULL) {
-		printf("%d->", curr->tid);
-		curr = curr->next;
-	}
-	printf("\n");
-}
 
 void setup_context(ucontext_t *uc, void (*func)(), ucontext_t *uc_link, void *arg) {
 	getcontext(uc);
@@ -145,21 +46,20 @@ void init_scheduler() {
 	scheduler = (Scheduler *) malloc(sizeof(*scheduler));
 
 	// setup queue
-	scheduler->thread_queue = new_queue();
+	for (int i=0; i < MLFQ_LEVELS; i++) {
+		scheduler->thread_queues[i] = new_queue();
+	}
 
 	// create main thread
 	tcb_t *main_tcb = new_tcb(0, 0);
-	getcontext(&(main_tcb->uctx));
 	scheduler->running = main_tcb;
+	getcontext(&(main_tcb->uctx));
 
 	// setup thread info
 	scheduler->ts_arr = (char *) malloc(32 * sizeof(char));
 	scheduler->ts_arr[0] = SCHEDULED;  // main thread scheduled
 	scheduler->ts_count = 1;
 	scheduler->ts_size = 32;
-
-	// setup mutex
-	// setup thread info
 
 	// setup exit context
 	setup_context(&(scheduler->exit_uctx), rpthread_exit, NULL, NULL);
@@ -197,7 +97,7 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 		scheduler->ts_arr = (char *) realloc(scheduler->ts_arr, scheduler->ts_size * sizeof(char));
 	}
 	scheduler->ts_arr[*thread] = READY;
-	enqueue(scheduler->thread_queue, tcb);
+	enqueue(scheduler->thread_queues[0], tcb);
 
 	enable_timer();
     return 0;
@@ -221,15 +121,7 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 	return 0;
 };
 
-tcb_t *find_next_ready(ThreadQueue *thread_queue) {
-	tcb_t *curr = thread_queue->head;
-	while (curr != NULL) {
-		if (scheduler->ts_arr[curr->tid] == READY)
-			return curr;
-		curr = curr->next;
-	}
-	return NULL;
-}
+
 
 /* initialize the mutex lock */
 int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr) {
@@ -258,21 +150,52 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 	return 0;
 };
 
+tcb_t *find_next_ready(ThreadQueue *thread_queue) {
+	tcb_t *curr = thread_queue->head;
+	while (curr != NULL) {
+		if (scheduler->ts_arr[curr->tid] == READY)
+			return curr;
+		curr = curr->next;
+	}
+	return NULL;
+}
+
+tcb_t* mlfq_find_next_ready() {
+	for (int i=0; i < MLFQ_LEVELS; i++) {
+		ThreadQueue *tq = scheduler->thread_queues[i];
+		if (tq->size == 0)
+			continue;
+		
+		tcb_t *next_thread = find_next_ready(tq);
+		if (next_thread == NULL)
+			continue;
+
+		remove_tcb(tq, next_thread);
+		return next_thread;
+	}
+	return NULL;
+}
+
 static void schedule() {
 	disable_timer();
 	tcb_t *old_tcb = scheduler->running;
-	
+
+	// for (int i=0; i < MLFQ_LEVELS; i++) {
+	// 	printf("%d ", scheduler->thread_queues[i]->size);
+	// }
+	// printf("\n");
 	// called from handle_exit
 	if (scheduler->ts_arr[old_tcb->tid] == FINISHED) {
 		free_tcb(old_tcb);
-		if (scheduler->thread_queue->size == 0) { // no threads left
-			free(scheduler->thread_queue); //more freeing required here
-			exit(0);
-		}
 
 		// load next thread
-		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
-		remove_tcb(scheduler->thread_queue, next_thread);
+		tcb_t *next_thread = mlfq_find_next_ready();
+		if (next_thread == NULL) {
+			for (int i=0; i < MLFQ_LEVELS; i++) {
+				free(scheduler->thread_queues[i]);
+			}
+			exit(0);
+		}
 		
 		scheduler->running = next_thread;
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
@@ -280,30 +203,16 @@ static void schedule() {
 		enable_timer();
 		setcontext(&(scheduler->running->uctx));
 	}
-	// called from mutex_lock
-	// if (scheduler->ts_arr[old_tcb->tid] == BLOCKED) {
-	// 	// load next thread
-	// 	tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
-	// 	remove_tcb(scheduler->thread_queue, next_thread);
-		
-	// 	scheduler->running = next_thread;
-	// 	scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
-	// 	enable_timer();
-	// 	swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
-	// }
-	// called from handle_timeout
 	else {
-		if (scheduler->thread_queue->size == 0) {  // skip scheduling, resume current thread
+		tcb_t *next_thread = mlfq_find_next_ready();
+		if (next_thread == NULL) {
 			scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
 			enable_timer();
 			return;
 		}
 		
 		scheduler->ts_arr[scheduler->running->tid] = READY;
-		enqueue(scheduler->thread_queue, scheduler->running);
-
-		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
-		remove_tcb(scheduler->thread_queue, next_thread);
+		enqueue(scheduler->thread_queues[scheduler->running->thread_priority], scheduler->running);
 
 		scheduler->running = next_thread;
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
@@ -324,6 +233,10 @@ void disable_timer() {
 
 void handle_timeout(int signum) {
 	if (enabled) {
+		tcb_t *running = scheduler->running;
+		if (running->thread_priority < MLFQ_LEVELS-1) {
+			running->thread_priority++;
+		}
 		schedule();
 	}
 }
