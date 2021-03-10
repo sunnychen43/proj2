@@ -5,7 +5,6 @@ static void schedule();
 /********** Queue Implementation **********/
 
 void handle_timeout(int signum);
-void handle_exit();
 void enable_timer();
 void disable_timer();
 
@@ -14,18 +13,17 @@ static struct itimerval itimer;
 static struct sigaction sa;
 static bool enabled;
 
-void setup_context(ucontext_t *uc, void (*func)(), ucontext_t *uc_link, void *arg) {
+
+void thread_wrapper(tcb_t *tcb) {
+	scheduler->ret_arr[tcb->tid] = tcb->func_ptr(tcb->args);
+}
+
+void setup_tcb_context(ucontext_t *uc, ucontext_t *uc_link, tcb_t *tcb) {
 	getcontext(uc);
 	uc->uc_stack.ss_sp = malloc(SS_SIZE);
 	uc->uc_stack.ss_size = SS_SIZE;
 	uc->uc_link = uc_link;
-
-	if (arg != NULL) {
-		makecontext(uc, func, 1, arg);
-	}
-	else {
-		makecontext(uc, func, 0);
-	}
+	makecontext(uc, thread_wrapper, 1, tcb);
 }
 
 
@@ -34,7 +32,7 @@ void setup_context(ucontext_t *uc, void (*func)(), ucontext_t *uc_link, void *ar
 // 		tcb_t 	   	*running;
 //
 // 		char		*ts_arr;
-// 		uint8_t		 ts_count;
+// 		uint8_t		 t_count;
 // 		uint8_t		 ts_size;
 //
 // 		ucontext_t 	 exit_uctx;
@@ -51,18 +49,26 @@ void init_scheduler() {
 	}
 
 	// create main thread
-	tcb_t *main_tcb = new_tcb(0, 0);
+	tcb_t *main_tcb = new_tcb(0, NULL, NULL);
 	scheduler->running = main_tcb;
 	getcontext(&(main_tcb->uctx));
 
 	// setup thread info
 	scheduler->ts_arr = (char *) malloc(32 * sizeof(char));
 	scheduler->ts_arr[0] = SCHEDULED;  // main thread scheduled
-	scheduler->ts_count = 1;
-	scheduler->ts_size = 32;
+
+	scheduler->ret_arr = malloc(32 * sizeof(*(scheduler->ret_arr)));
+	scheduler->ret_arr[0] = NULL;
+
+	scheduler->t_count = 1;
+	scheduler->t_max = 32;
 
 	// setup exit context
-	setup_context(&(scheduler->exit_uctx), rpthread_exit, NULL, NULL);
+	getcontext(&(scheduler->exit_uctx));
+	scheduler->exit_uctx.uc_stack.ss_sp = malloc(SS_SIZE);
+	scheduler->exit_uctx.uc_stack.ss_size = SS_SIZE;
+	scheduler->exit_uctx.uc_link = NULL;
+	makecontext(&(scheduler->exit_uctx), rpthread_exit, 0);
 
 	//setup itimer
 	itimer.it_interval.tv_sec = 0;
@@ -86,18 +92,21 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 		disable_timer();
 	}
 
-	*thread = scheduler->ts_count;
-	scheduler->ts_count++;
+	*thread = scheduler->t_count;
+	scheduler->t_count++;
 
-	tcb_t *tcb = new_tcb(*thread, 0);
-	setup_context(&(tcb->uctx), function, &(scheduler->exit_uctx), arg);
+	tcb_t *tcb = new_tcb(*thread, function, arg);
+	setup_tcb_context(&(tcb->uctx), &(scheduler->exit_uctx), tcb);
 
 	// resize ts_arr
-	if (scheduler->ts_count > scheduler->ts_size) {
-		scheduler->ts_size *= 2;
-		scheduler->ts_arr = (char *) realloc(scheduler->ts_arr, scheduler->ts_size * sizeof(char));
+	if (scheduler->t_count > scheduler->t_max) {
+		scheduler->t_max *= 2;
+		scheduler->ts_arr = realloc(scheduler->ts_arr, scheduler->t_max * sizeof(char));
+		scheduler->ret_arr = realloc(scheduler->ret_arr, 32 * sizeof(*(scheduler->ret_arr)));
 	}
 	scheduler->ts_arr[*thread] = READY;
+	scheduler->ret_arr[*thread] = NULL;
+
 	enqueue(scheduler->thread_queues[0], tcb);
 
 	enable_timer();
@@ -119,6 +128,11 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 	while (scheduler->ts_arr[thread] != FINISHED) {
 		rpthread_yield();
 	}
+
+	if (value_ptr != NULL) {
+		*value_ptr = scheduler->ret_arr[thread];
+	}
+
 	return 0;
 };
 
@@ -263,12 +277,10 @@ void funcA() {
 	// 	printf("a: %d\n", i);
 	// 	i++;
 	// }
-
-	while (i < 100000) {
-		rpthread_mutex_lock(&mutex);
+	int i=0;
+	while (i < 1000000) {
+		printf("a");
 		i++;
-		printf("a: %d\n", i);
-		rpthread_mutex_unlock(&mutex);
 	}
 }
 
@@ -278,26 +290,36 @@ void funcB() {
 	// 	printf("b: %d\n", i);
 	// 	i++;
 	// }
-
-	while (i < 100000) {
-		rpthread_mutex_lock(&mutex);
+	int i=0;
+	while (i < 1000000) {
+		printf("b");
 		i++;
-		printf("b: %d\n", i);
-		rpthread_mutex_unlock(&mutex);
+	}
+}
+
+void funcC() {
+	int i=0;
+	while (i < 1000000) {
+		printf("c");
+		i++;
 	}
 }
 
 // int main() {
 
-// 	rpthread_t a, b;
+// 	rpthread_t a, b, c;
 // 	rpthread_mutex_init(&mutex, NULL);
 // 	printf("a\n");
 	
 // 	rpthread_create(&a, NULL, funcA, NULL);
 // 	rpthread_create(&b, NULL, funcB, NULL);
+// 	rpthread_create(&c, NULL, funcC, NULL);
 
 // 	rpthread_join(a, NULL);
 // 	rpthread_join(b, NULL);
+// 	rpthread_join(c, NULL);
+
+// 	printf("\n");
 
 // 	printf("done\n");
 

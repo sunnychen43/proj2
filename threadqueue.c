@@ -77,11 +77,15 @@ tcb_t* peek(ThreadQueue *queue) {
 }
 
 
-tcb_t* new_tcb(rpthread_t tid, int thread_priority) {
+tcb_t* new_tcb(rpthread_t tid, void *(*func_ptr)(void *), void *args) {
 	tcb_t *tcb = malloc(sizeof(*tcb));
 	tcb->tid = tid;
-	tcb->thread_priority = thread_priority;
+	tcb->thread_priority = 0;
 	tcb->next = NULL;
+
+	tcb->func_ptr = func_ptr;
+	tcb->args = args;
+	
 	return tcb;
 }
 

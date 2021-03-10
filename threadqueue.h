@@ -14,10 +14,13 @@ typedef struct ThreadQueue {
 } ThreadQueue;
 
 typedef struct tcb_t {
-        rpthread_t      tid;
-        uint8_t         thread_priority;
-        ucontext_t      uctx;
+        rpthread_t   tid;
+        uint8_t      thread_priority;
+        ucontext_t   uctx;
         struct tcb_t *next;
+
+        void *(*func_ptr)(void *);
+        void *args;
 
 } tcb_t;
 
@@ -27,7 +30,7 @@ void remove_tcb(ThreadQueue *queue, tcb_t *tcb);
 tcb_t* peek(ThreadQueue *queue);
 
 ThreadQueue* new_queue();
-tcb_t* new_tcb(rpthread_t tid, int thread_priority);
+tcb_t* new_tcb(rpthread_t tid, void *(*func_ptr)(void *), void *args);
 void free_tcb(tcb_t *tcb);
 
 #endif

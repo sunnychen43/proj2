@@ -49,14 +49,15 @@ typedef struct rpthread_mutex_t {
 } rpthread_mutex_t;
 
 typedef struct Scheduler {
-	ThreadQueue *thread_queues[MLFQ_LEVELS];
-	tcb_t 	   	*running;
+	ThreadQueue * thread_queues[MLFQ_LEVELS];
+	tcb_t 	    * running;
 
-	char		*ts_arr;
-	uint8_t		 ts_count;
-	uint8_t		 ts_size;
-
-	ucontext_t 	 exit_uctx;
+	char *		  ts_arr;
+	void **       ret_arr;
+	uint8_t		  t_count;
+	uint8_t		  t_max;
+ 
+	ucontext_t 	  exit_uctx;
 
 } Scheduler;
 
