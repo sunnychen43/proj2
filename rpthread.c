@@ -14,8 +14,6 @@ static struct itimerval itimer, pause_itimer;
 static struct sigaction sa;
 static bool enabled;
 
-static int threads_running;
-
 void thread_wrapper(tcb_t *tcb) {
 	tcb->retval = tcb->func_ptr(tcb->args);
 }
@@ -41,8 +39,6 @@ void init_scheduler() {
 	tcb_t *main_tcb = new_tcb(0, NULL, NULL);
 	scheduler->running = main_tcb;
 	getcontext(&(main_tcb->uctx));
-
-	threads_running++;
 
 	// setup thread info
 	scheduler->t_count = 1;
@@ -80,13 +76,12 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 
 	// resize ts_arr
 	if (scheduler->t_count > scheduler->t_max) {
-		scheduler->t_max *= 2;
+		scheduler->t_max += 32;
 		scheduler->tcb_arr = realloc(scheduler->tcb_arr, scheduler->t_max * sizeof(*(scheduler->tcb_arr)));
 	}
 	scheduler->tcb_arr[*thread] = tcb;
 
 	enqueue(scheduler->thread_queues[0], tcb);
-	threads_running++;
 	enable_timer(TIMESLICE);
     return 0;
 };
@@ -203,7 +198,6 @@ static void schedule() {
 
 	// called from handle_exit
 	if (old_tcb->state == FINISHED) {
-		threads_running--;
 		tcb_t *curr = old_tcb->joined->head;
 		while (curr != NULL) {
 			curr->state = READY;
