@@ -90,6 +90,9 @@ tcb_t* new_tcb(rpthread_t tid, void *(*func_ptr)(void *), void *args) {
 	tcb->retval = NULL;
 	tcb->joined = new_queue();
 
+	tcb->last_run = 0;
+	tcb->timeslice = TIMESLICE;
+
 	tcb->next = NULL;
 
 	tcb->func_ptr = func_ptr;

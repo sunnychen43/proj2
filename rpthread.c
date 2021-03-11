@@ -1,4 +1,5 @@
 #include "rpthread.h"
+#include <time.h>
 
 static void schedule();
 
@@ -13,6 +14,7 @@ static struct itimerval itimer, pause_itimer;
 static struct sigaction sa;
 static bool enabled;
 
+static int threads_running;
 
 void thread_wrapper(tcb_t *tcb) {
 	tcb->retval = tcb->func_ptr(tcb->args);
@@ -40,6 +42,8 @@ void init_scheduler() {
 	scheduler->running = main_tcb;
 	getcontext(&(main_tcb->uctx));
 
+	threads_running++;
+
 	// setup thread info
 	scheduler->t_count = 1;
 	scheduler->t_max = 32;
@@ -53,16 +57,9 @@ void init_scheduler() {
 	scheduler->exit_uctx.uc_link = NULL;
 	makecontext(&(scheduler->exit_uctx), rpthread_exit, 0);
 
-	//setup itimer
-	itimer.it_interval.tv_sec = 0;
-	itimer.it_interval.tv_usec = TIMESLICE*1000;
-	itimer.it_value = itimer.it_interval;
-
 	memset (&sa, 0, sizeof (sa));
 	sa.sa_handler = &handle_timeout;
 	sigaction(SIGPROF, &sa, NULL);
-	setitimer(ITIMER_PROF, &itimer, NULL);
-	disable_timer();
 }
 
 
@@ -89,8 +86,8 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 	scheduler->tcb_arr[*thread] = tcb;
 
 	enqueue(scheduler->thread_queues[0], tcb);
-
-	enable_timer();
+	threads_running++;
+	enable_timer(TIMESLICE);
     return 0;
 };
 
@@ -199,12 +196,14 @@ static void sched_mlfq() {
 
 static void schedule() {
 	disable_timer();
+	clock_t curr_time = clock();
 
 	tcb_t *old_tcb = scheduler->running;
 	bool no_save = (old_tcb->state == FINISHED);
 
 	// called from handle_exit
 	if (old_tcb->state == FINISHED) {
+		threads_running--;
 		tcb_t *curr = old_tcb->joined->head;
 		while (curr != NULL) {
 			curr->state = READY;
@@ -218,13 +217,27 @@ static void schedule() {
 		scheduler->running = NULL;
 	}
 
+	if (old_tcb->priority < MLFQ_LEVELS-1) {
+		double ms_used = (old_tcb->last_run == 0) ? 
+			0 : ((double)(curr_time - old_tcb->last_run)) / CLOCKS_PER_SEC * 1000;
+
+		old_tcb->timeslice -= ms_used;
+		if (old_tcb->timeslice <= 0) {
+			if (old_tcb->priority < MLFQ_LEVELS-1) {
+				old_tcb->priority++;
+			}
+			old_tcb->timeslice = TIMESLICE;
+		}
+	}
+
 	#ifdef MLFQ
 		sched_mlfq();
 	#else
 		sched_rr();
 	#endif
 
-	enable_timer();
+	scheduler->running->last_run = clock();
+	enable_timer(scheduler->running->timeslice);
 	if (scheduler->running == old_tcb){
 		return;
 	}
@@ -236,7 +249,11 @@ static void schedule() {
 	}
 }
 
-void enable_timer() {
+void enable_timer(int time) {
+	itimer.it_interval.tv_sec = 0;
+	itimer.it_interval.tv_usec = time * 1000;
+	itimer.it_value = itimer.it_interval;
+
 	setitimer(ITIMER_PROF, &itimer, NULL);
 	enabled = true;
 }

@@ -3,6 +3,7 @@
 
 #include <ucontext.h>
 #include <stdint.h>
+#include <time.h>
 
 typedef uint8_t rpthread_t;
 
@@ -17,15 +18,19 @@ typedef struct tcb_t {
         rpthread_t   tid;
         uint8_t      priority;
         char         state;
+
         void*        retval;
         ThreadQueue *joined;
+
         ucontext_t   uctx;
         
         void *(*func_ptr)(void *);
         void *args;
 
-        struct tcb_t *next;
+        clock_t last_run;
+        int timeslice;
 
+        struct tcb_t *next;
 } tcb_t;
 
 void enqueue(ThreadQueue *queue, tcb_t *tcb);
