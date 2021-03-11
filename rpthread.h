@@ -23,6 +23,7 @@
 #define BLOCKED 2
 #define FINISHED 3
 #define YIELD 4
+#define JOIN 5
 
 /* include lib header files that you need here: */
 #include <unistd.h>
@@ -54,6 +55,7 @@ typedef struct Scheduler {
 
 	char *		  ts_arr;
 	void **       ret_arr;
+	ThreadQueue** join_arr;
 	uint8_t		  t_count;
 	uint8_t		  t_max;
 

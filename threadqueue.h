@@ -19,6 +19,8 @@ typedef struct tcb_t {
         ucontext_t   uctx;
         struct tcb_t *next;
 
+        ThreadQueue joined;
+
         void *(*func_ptr)(void *);
         void *args;
 

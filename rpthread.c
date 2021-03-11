@@ -54,11 +54,14 @@ void init_scheduler() {
 	getcontext(&(main_tcb->uctx));
 
 	// setup thread info
-	scheduler->ts_arr = (char *) malloc(32 * sizeof(char));
+	scheduler->ts_arr = malloc(32 * sizeof(char));
 	scheduler->ts_arr[0] = SCHEDULED;  // main thread scheduled
 
 	scheduler->ret_arr = malloc(32 * sizeof(*(scheduler->ret_arr)));
 	scheduler->ret_arr[0] = NULL;
+
+	scheduler->join_arr = malloc(32 * sizeof(*(scheduler->join_arr)));
+	scheduler->join_arr[0] = new_queue();
 
 	scheduler->t_count = 1;
 	scheduler->t_max = 32;
@@ -102,10 +105,12 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 	if (scheduler->t_count > scheduler->t_max) {
 		scheduler->t_max *= 2;
 		scheduler->ts_arr = realloc(scheduler->ts_arr, scheduler->t_max * sizeof(char));
-		scheduler->ret_arr = realloc(scheduler->ret_arr, 32 * sizeof(*(scheduler->ret_arr)));
+		scheduler->ret_arr = realloc(scheduler->ret_arr, scheduler->t_max * sizeof(*(scheduler->ret_arr)));
+		scheduler->join_arr = realloc(scheduler->join_arr, scheduler->t_max * sizeof(*(scheduler->join_arr)));
 	}
 	scheduler->ts_arr[*thread] = READY;
 	scheduler->ret_arr[*thread] = NULL;
+	scheduler->join_arr[*thread] = new_queue();
 
 	enqueue(scheduler->thread_queues[0], tcb);
 
@@ -125,8 +130,10 @@ void rpthread_exit(void *value_ptr) {
 };
 
 int rpthread_join(rpthread_t thread, void **value_ptr) {
-	while (scheduler->ts_arr[thread] != FINISHED) {
-		rpthread_yield();
+	if (scheduler->ts_arr[thread] != FINISHED) {
+		scheduler->ts_arr[scheduler->running->tid] = BLOCKED;
+		enqueue(scheduler->join_arr[thread], scheduler->running);
+		schedule();
 	}
 
 	if (value_ptr != NULL) {
@@ -219,9 +226,18 @@ static void schedule() {
 	// 	printf("%d ", scheduler->thread_queues[i]->size);
 	// }
 	// printf("\n");
-	print_queue(scheduler->thread_queues[0]->head);
+	// if (scheduler->thread_queues[0]->size > 0)
+	// 	print_queue(scheduler->thread_queues[0]->head);
+	// printf("%d\n", scheduler->running->tid);
 	// called from handle_exit
 	if (scheduler->ts_arr[old_tcb->tid] == FINISHED) {
+		tcb_t *curr = scheduler->join_arr[old_tcb->tid]->head;
+		while (curr != NULL) {
+			scheduler->ts_arr[curr->tid] = READY;
+			enqueue(scheduler->thread_queues[curr->thread_priority], curr);
+			curr = curr->next;
+		}
+
 		free_tcb(old_tcb);
 
 		// load next thread
@@ -239,26 +255,43 @@ static void schedule() {
 		enable_timer();
 		setcontext(&(scheduler->running->uctx));
 	}
-	else {
+	else if (scheduler->ts_arr[old_tcb->tid] == BLOCKED) {
 		tcb_t *next_thread = mlfq_find_next_ready();
-		if (next_thread == NULL) {
+
+		scheduler->running = next_thread;
+		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+
+		enable_timer();
+		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
+	}
+	else {
+		bool first = true;
+		for (int i = old_tcb->thread_priority; i >= 0; i--) {
+			if (scheduler->thread_queues[i]->size > 0) {
+				first = false;
+				break;
+			}
+		}
+		if (first) {
 			scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
 			enable_timer();
 			return;
 		}
-		
+
 		scheduler->ts_arr[scheduler->running->tid] = READY;
 		enqueue(scheduler->thread_queues[scheduler->running->thread_priority], scheduler->running);
-
+		tcb_t *next_thread = mlfq_find_next_ready();
+		
 		scheduler->running = next_thread;
 		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+
 		enable_timer();
 		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
 	}
 }
 
 void enable_timer() {
-	// setitimer(ITIMER_PROF, &itimer, NULL);
+	setitimer(ITIMER_PROF, &itimer, NULL);
 	enabled = true;
 }
 
