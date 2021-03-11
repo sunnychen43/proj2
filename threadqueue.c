@@ -11,6 +11,9 @@ ThreadQueue* new_queue() {
 }
 
 void enqueue(ThreadQueue *queue, tcb_t *node) {
+	if (node == NULL)
+		return;
+
 	if (queue->tail == NULL) {
 		queue->head = node;
 	}
