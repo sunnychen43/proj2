@@ -1,4 +1,5 @@
 #include "threadqueue.h"
+#include "rpthread.h"
 #include <stdlib.h>
 
 ThreadQueue* new_queue() {
@@ -79,8 +80,13 @@ tcb_t* peek(ThreadQueue *queue) {
 
 tcb_t* new_tcb(rpthread_t tid, void *(*func_ptr)(void *), void *args) {
 	tcb_t *tcb = malloc(sizeof(*tcb));
+
 	tcb->tid = tid;
-	tcb->thread_priority = 0;
+	tcb->priority = 0;
+	tcb->state = READY;
+	tcb->retval = NULL;
+	tcb->joined = new_queue();
+
 	tcb->next = NULL;
 
 	tcb->func_ptr = func_ptr;

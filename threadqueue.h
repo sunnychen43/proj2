@@ -15,14 +15,16 @@ typedef struct ThreadQueue {
 
 typedef struct tcb_t {
         rpthread_t   tid;
-        uint8_t      thread_priority;
+        uint8_t      priority;
+        char         state;
+        void*        retval;
+        ThreadQueue *joined;
         ucontext_t   uctx;
-        struct tcb_t *next;
-
-        ThreadQueue joined;
-
+        
         void *(*func_ptr)(void *);
         void *args;
+
+        struct tcb_t *next;
 
 } tcb_t;
 

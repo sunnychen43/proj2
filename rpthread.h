@@ -53,9 +53,7 @@ typedef struct Scheduler {
 	ThreadQueue * thread_queues[MLFQ_LEVELS];
 	tcb_t 	    * running;
 
-	char *		  ts_arr;
-	void **       ret_arr;
-	ThreadQueue** join_arr;
+	tcb_t		**tcb_arr;
 	uint8_t		  t_count;
 	uint8_t		  t_max;
 

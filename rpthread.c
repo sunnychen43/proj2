@@ -15,7 +15,7 @@ static bool enabled;
 
 
 void thread_wrapper(tcb_t *tcb) {
-	scheduler->ret_arr[tcb->tid] = tcb->func_ptr(tcb->args);
+	tcb->retval = tcb->func_ptr(tcb->args);
 }
 
 void setup_tcb_context(ucontext_t *uc, ucontext_t *uc_link, tcb_t *tcb) {
@@ -54,17 +54,10 @@ void init_scheduler() {
 	getcontext(&(main_tcb->uctx));
 
 	// setup thread info
-	scheduler->ts_arr = malloc(32 * sizeof(char));
-	scheduler->ts_arr[0] = SCHEDULED;  // main thread scheduled
-
-	scheduler->ret_arr = malloc(32 * sizeof(*(scheduler->ret_arr)));
-	scheduler->ret_arr[0] = NULL;
-
-	scheduler->join_arr = malloc(32 * sizeof(*(scheduler->join_arr)));
-	scheduler->join_arr[0] = new_queue();
-
 	scheduler->t_count = 1;
 	scheduler->t_max = 32;
+	scheduler->tcb_arr = malloc(scheduler->t_max * sizeof(*(scheduler->tcb_arr)));
+	scheduler->tcb_arr[0] = main_tcb;
 
 	// setup exit context
 	getcontext(&(scheduler->exit_uctx));
@@ -104,13 +97,9 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 	// resize ts_arr
 	if (scheduler->t_count > scheduler->t_max) {
 		scheduler->t_max *= 2;
-		scheduler->ts_arr = realloc(scheduler->ts_arr, scheduler->t_max * sizeof(char));
-		scheduler->ret_arr = realloc(scheduler->ret_arr, scheduler->t_max * sizeof(*(scheduler->ret_arr)));
-		scheduler->join_arr = realloc(scheduler->join_arr, scheduler->t_max * sizeof(*(scheduler->join_arr)));
+		scheduler->tcb_arr = realloc(scheduler->tcb_arr, scheduler->t_max * sizeof(*(scheduler->tcb_arr)));
 	}
-	scheduler->ts_arr[*thread] = READY;
-	scheduler->ret_arr[*thread] = NULL;
-	scheduler->join_arr[*thread] = new_queue();
+	scheduler->tcb_arr[*thread] = tcb;
 
 	enqueue(scheduler->thread_queues[0], tcb);
 
@@ -119,25 +108,25 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 };
 
 int rpthread_yield() {
-	scheduler->ts_arr[scheduler->running->tid] = YIELD;
+	scheduler->tcb_arr[scheduler->running->tid]->state = YIELD;
 	schedule();
 	return 0;
 };
 
 void rpthread_exit(void *value_ptr) {
-	scheduler->ts_arr[scheduler->running->tid] = FINISHED;
+	scheduler->tcb_arr[scheduler->running->tid]->state = FINISHED;
 	schedule();
 };
 
 int rpthread_join(rpthread_t thread, void **value_ptr) {
-	if (scheduler->ts_arr[thread] != FINISHED) {
-		scheduler->ts_arr[scheduler->running->tid] = BLOCKED;
-		enqueue(scheduler->join_arr[thread], scheduler->running);
+	if (scheduler->tcb_arr[thread]->state != FINISHED) {
+		scheduler->tcb_arr[scheduler->running->tid]->state = BLOCKED;
+		enqueue(scheduler->tcb_arr[thread]->joined, scheduler->running);
 		schedule();
 	}
 
 	if (value_ptr != NULL) {
-		*value_ptr = scheduler->ret_arr[thread];
+		*value_ptr = scheduler->tcb_arr[thread]->retval;
 	}
 
 	return 0;
@@ -157,8 +146,8 @@ int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mute
 int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
 	while (__sync_lock_test_and_set(&(mutex->lock), 1) == 1) {
 		tcb_t *running = scheduler->running;
-		if (running->thread_priority < MLFQ_LEVELS-1) {
-			running->thread_priority++;
+		if (running->priority < MLFQ_LEVELS-1) {
+			running->priority++;
 		}
 		rpthread_yield();
 	}
@@ -187,7 +176,7 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 tcb_t *find_next_ready(ThreadQueue *thread_queue) {
 	tcb_t *curr = thread_queue->head;
 	while (curr != NULL) {
-		if (scheduler->ts_arr[curr->tid] == READY)
+		if (scheduler->tcb_arr[curr->tid]->state == READY)
 			return curr;
 		curr = curr->next;
 	}
@@ -230,15 +219,15 @@ static void schedule() {
 	// 	print_queue(scheduler->thread_queues[0]->head);
 	// printf("%d\n", scheduler->running->tid);
 	// called from handle_exit
-	if (scheduler->ts_arr[old_tcb->tid] == FINISHED) {
-		tcb_t *curr = scheduler->join_arr[old_tcb->tid]->head;
+	if (old_tcb->state == FINISHED) {
+		tcb_t *curr = old_tcb->joined->head;
 		while (curr != NULL) {
-			scheduler->ts_arr[curr->tid] = READY;
-			enqueue(scheduler->thread_queues[curr->thread_priority], curr);
+			curr->state = READY;
+			enqueue(scheduler->thread_queues[curr->priority], curr);
 			curr = curr->next;
 		}
 
-		free_tcb(old_tcb);
+		free(old_tcb->uctx.uc_stack.ss_sp);
 
 		// load next thread
 		tcb_t *next_thread = mlfq_find_next_ready();
@@ -250,40 +239,40 @@ static void schedule() {
 		}
 		
 		scheduler->running = next_thread;
-		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+		scheduler->running->state = SCHEDULED;
 
 		enable_timer();
 		setcontext(&(scheduler->running->uctx));
 	}
-	else if (scheduler->ts_arr[old_tcb->tid] == BLOCKED) {
+	else if (old_tcb->state == BLOCKED) {
 		tcb_t *next_thread = mlfq_find_next_ready();
 
 		scheduler->running = next_thread;
-		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+		scheduler->running->state = SCHEDULED;
 
 		enable_timer();
 		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
 	}
 	else {
 		bool first = true;
-		for (int i = old_tcb->thread_priority; i >= 0; i--) {
+		for (int i = old_tcb->priority; i >= 0; i--) {
 			if (scheduler->thread_queues[i]->size > 0) {
 				first = false;
 				break;
 			}
 		}
 		if (first) {
-			scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+			scheduler->running->state = SCHEDULED;
 			enable_timer();
 			return;
 		}
 
-		scheduler->ts_arr[scheduler->running->tid] = READY;
-		enqueue(scheduler->thread_queues[scheduler->running->thread_priority], scheduler->running);
+		scheduler->running->state = READY;
+		enqueue(scheduler->thread_queues[scheduler->running->priority], scheduler->running);
 		tcb_t *next_thread = mlfq_find_next_ready();
 		
 		scheduler->running = next_thread;
-		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+		scheduler->running->state = SCHEDULED;
 
 		enable_timer();
 		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
@@ -303,8 +292,8 @@ void disable_timer() {
 void handle_timeout(int signum) {
 	if (enabled) {
 		tcb_t *running = scheduler->running;
-		if (running->thread_priority < MLFQ_LEVELS-1) {
-			running->thread_priority++;
+		if (running->priority < MLFQ_LEVELS-1) {
+			running->priority++;
 		}
 		schedule();
 	}
