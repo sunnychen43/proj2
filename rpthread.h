@@ -23,6 +23,8 @@
 #define BLOCKED 2
 #define FINISHED 3
 #define YIELD 4
+#define RR 5
+#define MLFQ 6
 
 /* include lib header files that you need here: */
 #include <unistd.h>
@@ -44,7 +46,6 @@ typedef uint8_t rpthread_t;
 typedef struct tcb_t {
         rpthread_t      tid;
         uint8_t         thread_priority;
-
         ucontext_t      uctx;
         struct tcb_t *next;
 
@@ -64,7 +65,7 @@ typedef struct rpthread_mutex_t {
 } rpthread_mutex_t;
 
 typedef struct Scheduler {
-	ThreadQueue *thread_queue;
+	ThreadQueue *thread_queue_arr[4];
 	tcb_t 	   	*running;
 
 	char		*ts_arr;

@@ -1,6 +1,7 @@
 #include "rpthread.h"
 
 static void schedule();
+static int sched = MLFQ;
 
 /********** Queue Implementation **********/
 ThreadQueue* new_queue() {
@@ -73,6 +74,7 @@ void remove_tcb(ThreadQueue *queue, tcb_t *tcb) {
 	return;
 }
 
+// not used?
 tcb_t* peek(ThreadQueue *queue) {
 	if (queue->size == 0) {
 		return NULL;
@@ -104,13 +106,17 @@ static struct sigaction sa;
 static bool enabled;
 
 void print_queue() {
-	printf("%d->", scheduler->running->tid);
-	tcb_t *curr = scheduler->thread_queue->head;
-	while (curr != NULL) {
-		printf("%d->", curr->tid);
-		curr = curr->next;
+	printf("Running Thread: %d ", scheduler->running->tid);
+	printf("Priority: %d\n", scheduler->running->thread_priority);
+	for (int i = 0; i < (sched == MLFQ ? 4 : 1); i++) {
+		printf("Queue %d: ", i);
+		tcb_t *curr = scheduler->thread_queue_arr[i]->head;
+		while (curr != NULL) {
+			printf("%d->", curr->tid);
+			curr = curr->next;
+		}
+		printf("\n");
 	}
-	printf("\n");
 }
 
 void setup_context(ucontext_t *uc, void (*func)(), ucontext_t *uc_link, void *arg) {
@@ -145,7 +151,9 @@ void init_scheduler() {
 	scheduler = (Scheduler *) malloc(sizeof(*scheduler));
 
 	// setup queue
-	scheduler->thread_queue = new_queue();
+	for (int i = 0; i < (sched == MLFQ ? 4 : 1); i++) {
+		scheduler->thread_queue_arr[i] = new_queue();
+	}
 
 	// create main thread
 	tcb_t *main_tcb = new_tcb(0, 0);
@@ -176,8 +184,7 @@ void init_scheduler() {
 }
 
 
-int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
-					void *(*function)(void *), void *arg) {
+int rpthread_create(rpthread_t *thread, pthread_attr_t *attr, void *(*function)(void *), void *arg) {
 	if (scheduler == NULL) {
 		init_scheduler();
 	}
@@ -197,7 +204,8 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 		scheduler->ts_arr = (char *) realloc(scheduler->ts_arr, scheduler->ts_size * sizeof(char));
 	}
 	scheduler->ts_arr[*thread] = READY;
-	enqueue(scheduler->thread_queue, tcb);
+	// threads always start at highest priority
+	enqueue(scheduler->thread_queue_arr[0], tcb);
 
 	enable_timer();
     return 0;
@@ -205,17 +213,20 @@ int rpthread_create(rpthread_t *thread, pthread_attr_t *attr,
 
 int rpthread_yield() {
 	scheduler->ts_arr[scheduler->running->tid] = YIELD;
+	printf("YIELD\n");
 	schedule();
 	return 0;
 };
 
 void rpthread_exit(void *value_ptr) {
 	scheduler->ts_arr[scheduler->running->tid] = FINISHED;
+	printf("EXIT\n");
 	schedule();
 };
 
 int rpthread_join(rpthread_t thread, void **value_ptr) {
 	while (scheduler->ts_arr[thread] != FINISHED) {
+		printf("Join Yield\n");
 		rpthread_yield();
 	}
 	return 0;
@@ -241,6 +252,7 @@ int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mute
 /* aquire the mutex lock */
 int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
 	while (__sync_lock_test_and_set(&(mutex->lock), 1) == 1) {
+		printf("Lock Yield\n");
 		rpthread_yield();
 	}
 	return 0;
@@ -258,58 +270,132 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 	return 0;
 };
 
-static void schedule() {
+void scheduler_exit(tcb_t *old_tcb) {
+	printf("Exiting\n");
+	free_tcb(old_tcb);
+	int threads_left = 0;
+	// count number of remaining threads
+	for (int i = 0; i < (sched == MLFQ ? 4 : 1); i++) {
+		threads_left += scheduler->thread_queue_arr[i]->size;
+	}
+	// no threads left
+	if (threads_left == 0) {
+		for (int i = 0; i < (sched == MLFQ ? 4 : 1); i++) {
+			free(scheduler->thread_queue_arr[i]); //more freeing required here?
+		}
+		exit(0);
+	}
+	// load next thread
+	uint8_t old_priority = old_tcb->thread_priority;
+	tcb_t *next_thread = NULL;
+	if (scheduler->thread_queue_arr[old_priority]->size == 0 && old_priority < 3) {
+		//no threads left in this priority queue, check in lowest priority queue
+		//note this branch never runs for RR as no threads left should trigger above if condition
+		next_thread = find_next_ready(scheduler->thread_queue_arr[old_priority+1]); //0 through 3, with 0 highest priority
+		remove_tcb(scheduler->thread_queue_arr[old_priority+1], next_thread);
+	}
+	else {
+		next_thread = find_next_ready(scheduler->thread_queue_arr[old_priority]); //0 through 3, with 0 highest priority
+		remove_tcb(scheduler->thread_queue_arr[old_priority], next_thread);
+	}
+	scheduler->running = next_thread;
+	scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+
+	enable_timer();
+	setcontext(&(scheduler->running->uctx));
+}
+
+void scheduler_timeout (tcb_t* old_tcb) {
+	printf("Timeout\n");
+	uint8_t old_priority = old_tcb->thread_priority;
+	// still same priority queue
+	//if (scheduler->thread_queue[old_priority]->size == 0 && (sched = RR || (sched == MLFQ && (scheduler->ts_arr[scheduler->running->tid] == YIELD || old_priority == 3))) {
+	if (sched == RR) {
+		if (scheduler->thread_queue_arr[old_priority]->size == 0) {  // skip scheduling, resume current thread
+				scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+				enable_timer();
+				return;
+			}
+			
+			scheduler->ts_arr[scheduler->running->tid] = READY;
+			enqueue(scheduler->thread_queue_arr[old_priority], scheduler->running);
+
+			tcb_t *next_thread = find_next_ready(scheduler->thread_queue_arr[old_priority]);
+			remove_tcb(scheduler->thread_queue_arr[old_priority], next_thread);
+
+			scheduler->running = next_thread;
+			scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+			enable_timer();
+			swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
+	}
+	// MLFQ
+	else {
+		// punish current thread
+		if (old_priority < 3) {
+			scheduler->ts_arr[scheduler->running->tid] = READY;
+			//decrease priority
+			scheduler->running->thread_priority += 1;
+			enqueue(scheduler->thread_queue_arr[old_priority+1], scheduler->running);	
+		}	
+		else {
+			enqueue(scheduler->thread_queue_arr[old_priority], scheduler->running);	
+		}
+		// load next thread
+		tcb_t *next_thread = NULL;
+		if (scheduler->thread_queue_arr[old_priority]->size == 0 && old_priority < 3) {
+			//no threads left in this priority queue
+			//note this branch never runs for RR
+			//move to next lowest priority queue
+			next_thread = find_next_ready(scheduler->thread_queue_arr[old_priority+1]); //0 through 3, with 0 highest priority
+			remove_tcb(scheduler->thread_queue_arr[old_priority+1], next_thread);
+		}
+		else {
+			next_thread = find_next_ready(scheduler->thread_queue_arr[old_priority]); //0 through 3, with 0 highest priority
+			remove_tcb(scheduler->thread_queue_arr[old_priority], next_thread);
+		}
+		scheduler->running = next_thread;
+		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
+
+		enable_timer();
+		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
+	}
+}
+
+static void sched_rr() {
+	print_queue();
 	disable_timer();
 	tcb_t *old_tcb = scheduler->running;
 	
 	// called from handle_exit
 	if (scheduler->ts_arr[old_tcb->tid] == FINISHED) {
-		free_tcb(old_tcb);
-		if (scheduler->thread_queue->size == 0) { // no threads left
-			free(scheduler->thread_queue); //more freeing required here
-			exit(0);
-		}
-
-		// load next thread
-		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
-		remove_tcb(scheduler->thread_queue, next_thread);
-		
-		scheduler->running = next_thread;
-		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
-
-		enable_timer();
-		setcontext(&(scheduler->running->uctx));
+		scheduler_exit(old_tcb);
 	}
-	// called from mutex_lock
-	// if (scheduler->ts_arr[old_tcb->tid] == BLOCKED) {
-	// 	// load next thread
-	// 	tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
-	// 	remove_tcb(scheduler->thread_queue, next_thread);
-		
-	// 	scheduler->running = next_thread;
-	// 	scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
-	// 	enable_timer();
-	// 	swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
-	// }
 	// called from handle_timeout
 	else {
-		if (scheduler->thread_queue->size == 0) {  // skip scheduling, resume current thread
-			scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
-			enable_timer();
-			return;
-		}
-		
-		scheduler->ts_arr[scheduler->running->tid] = READY;
-		enqueue(scheduler->thread_queue, scheduler->running);
-
-		tcb_t *next_thread = find_next_ready(scheduler->thread_queue);
-		remove_tcb(scheduler->thread_queue, next_thread);
-
-		scheduler->running = next_thread;
-		scheduler->ts_arr[scheduler->running->tid] = SCHEDULED;
-		enable_timer();
-		swapcontext(&(old_tcb->uctx), &(scheduler->running->uctx));
+		scheduler_timeout(old_tcb);
 	}
+}
+
+static void sched_mlfq() {
+	print_queue();
+	disable_timer();
+	tcb_t *old_tcb = scheduler->running;
+	
+	// called from handle_exit
+	if (scheduler->ts_arr[old_tcb->tid] == FINISHED) {
+		scheduler_exit(old_tcb);
+	}
+	// called from handle_timeout
+	else {
+		scheduler_timeout(old_tcb);
+	}
+}
+
+static void schedule() {
+	if (sched == RR)
+		sched_rr();
+	else if (sched == MLFQ)
+		sched_mlfq();
 }
 
 void enable_timer() {
@@ -324,15 +410,16 @@ void disable_timer() {
 
 void handle_timeout(int signum) {
 	if (enabled) {
+		printf("TIMEOUT SCHEDULE\n");
 		schedule();
 	}
 }
 
 rpthread_mutex_t mutex;
-int i=0;
+static int i=0;
 
 void funcA() {
-	// int i=0;
+	int i = 0;
     // while (1) {
 	// 	printf("a: %d\n", i);
 	// 	i++;
@@ -342,12 +429,13 @@ void funcA() {
 		rpthread_mutex_lock(&mutex);
 		i++;
 		printf("a: %d\n", i);
+		//print_queue();
 		rpthread_mutex_unlock(&mutex);
 	}
 }
 
 void funcB() {
-	// int i=0;
+	int i = 0;
     // while (1) {
 	// 	printf("b: %d\n", i);
 	// 	i++;
@@ -357,24 +445,24 @@ void funcB() {
 		rpthread_mutex_lock(&mutex);
 		i++;
 		printf("b: %d\n", i);
+		//print_queue();
 		rpthread_mutex_unlock(&mutex);
 	}
 }
 
-// int main() {
-
-// 	rpthread_t a, b;
-// 	rpthread_mutex_init(&mutex, NULL);
-// 	printf("a\n");
+int main() {
 	
-// 	rpthread_create(&a, NULL, funcA, NULL);
-// 	rpthread_create(&b, NULL, funcB, NULL);
+	rpthread_t a, b;
+	rpthread_mutex_init(&mutex, NULL);
+	printf("a\n");
+	
+	rpthread_create(&a, NULL, funcA, NULL);
+	rpthread_create(&b, NULL, funcB, NULL);
 
-// 	rpthread_join(a, NULL);
-// 	rpthread_join(b, NULL);
+	rpthread_join(a, NULL);
+	rpthread_join(b, NULL);
 
-// 	printf("done\n");
+	printf("done\n");
 
-// 	return 0;
-// }
-
+	return 0;
+}
