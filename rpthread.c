@@ -12,6 +12,7 @@ void init_scheduler();
 static void schedule();
 
 void handle_timeout(int signum);
+void handle_exit();
 void enable_timer();
 void disable_timer();
 
@@ -58,7 +59,7 @@ void init_scheduler() {
 	scheduler->exit_uctx->uc_stack.ss_sp = malloc(SS_SIZE);
 	scheduler->exit_uctx->uc_stack.ss_size = SS_SIZE;
 	scheduler->exit_uctx->uc_link = NULL;
-	makecontext(scheduler->exit_uctx, (void (*)())rpthread_exit, 0);
+	makecontext(scheduler->exit_uctx, handle_exit, 0);
 
 	// initialize timer signals
 	memset (&sa, 0, sizeof (sa));
@@ -114,10 +115,12 @@ int rpthread_yield() {
 
 /* 
  * Same as rpthread_yield, the scheduler will handle all the work with freeing
- * the finished thread. This function is also called when a non-main thread 
- * returns.
+ * the finished thread. If value_ptr is not NULL, the retval made avaliable to
+ * rpthread_join() is set to value_ptr.
  */
 void rpthread_exit(void *value_ptr) {
+	if (value_ptr)
+		scheduler->running->retval = value_ptr;
 	scheduler->running->state = FINISHED;  // tell scheduler to terminate running thread
 	schedule();
 };
@@ -245,6 +248,12 @@ void handle_timeout(int signum) {
 		}
 		schedule();
 	}
+}
+
+/* Runs after thread completes */
+void handle_exit() {
+	scheduler->running->state = FINISHED;
+	schedule();
 }
 
 
