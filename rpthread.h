@@ -18,56 +18,47 @@
 #define TIMESLICE 5
 #endif
 
-#define READY 0
-#define SCHEDULED 1
-#define BLOCKED 2
-#define FINISHED 3
-#define YIELD 4
-#define JOIN 5
-
-/* include lib header files that you need here: */
-#include <unistd.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
-#include <sys/time.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <signal.h>
-#include <ucontext.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <string.h>
-#include "threadqueue.h"
 
 #define SS_SIZE SIGSTKSZ
 #define MLFQ_LEVELS 8
 
-typedef uint8_t rpthread_t;
+#define READY 0
+#define BLOCKED 1
+#define FINISHED 2
+
+/* include lib header files that you need here: */
+#include <stdbool.h>
+#include <signal.h>
+#include <ucontext.h>
+#include "tcb.h"
+
 
 typedef struct rpthread_mutex_t {
-	unsigned char lock;
-	rpthread_t tid;
-	ThreadQueue* blocked_queue;
-	
+	unsigned char  lock;
+	rpthread_t 	   tid;
+	queue_t*       blocked_queue;
 } rpthread_mutex_t;
 
+
 typedef struct Scheduler {
-	ThreadQueue * thread_queues[MLFQ_LEVELS];
-	tcb_t 	    * running;
+	queue_t*    thread_queues[MLFQ_LEVELS];
+	tcb_t*      running;
 
-	tcb_t		**tcb_arr;
-	uint8_t		  t_count;
-	uint8_t		  t_max;
+	tcb_t**     tcb_arr;
+	uint8_t		t_count;
+	uint8_t		t_max;
 
-	ucontext_t 	  exit_uctx;
+	ucontext_t* exit_uctx;
+
+	bool enabled;
 
 } Scheduler;
 
 
-int rpthread_create(rpthread_t *thread, pthread_attr_t *attr, void *(*function)(void *), void *arg);
-int rpthread_yield();
+int  rpthread_create(rpthread_t *thread, pthread_attr_t *attr, void *(*function)(void *), void *arg);
+int  rpthread_yield();
 void rpthread_exit(void *value_ptr);
-int rpthread_join(rpthread_t thread, void **value_ptr);
+int  rpthread_join(rpthread_t thread, void **value_ptr);
 
 int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr);
 int rpthread_mutex_lock(rpthread_mutex_t *mutex);

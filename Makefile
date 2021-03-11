@@ -8,19 +8,19 @@ TSLICE=15 ##timeslice variable
 
 all: rpthread.a
 
-rpthread.a: rpthread.o threadqueue.o
-	$(AR) librpthread.a rpthread.o threadqueue.o
+rpthread.a: rpthread.o tcb.o
+	$(AR) librpthread.a rpthread.o tcb.o
 	$(RANLIB) librpthread.a
 
 rpthread.o: rpthread.h
-threadqueue.o: threadqueue.h
+tcb.o: tcb.h
 
 ifeq ($(SCHED), RR)
 	$(CC) -pthread $(CFLAGS) rpthread.c -DTIMESLICE=$(TSLICE)
-	$(CC) $(CFLAGS) threadqueue.c
+	$(CC) $(CFLAGS) tcb.c
 else ifeq ($(SCHED), MLFQ)
 	$(CC) -pthread $(CFLAGS) rpthread.c -DMLFQ -DTIMESLICE=$(TSLICE)
-	$(CC) $(CFLAGS) threadqueue.c
+	$(CC) $(CFLAGS) tcb.c
 else
 	echo "no such scheduling algorithm"
 endif
