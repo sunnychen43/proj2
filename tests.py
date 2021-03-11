@@ -21,20 +21,20 @@ subprocess.run(['./genRecord.sh'])
 
 processes = 40
 
-# external_cal_test = subprocess.Popen(['./external_cal', str(processes)], stdout=subprocess.PIPE)
-# parallel_cal_test = subprocess.Popen(['./parallel_cal', str(processes)], stdout=subprocess.PIPE)
-# vector_multiply_test = subprocess.Popen(['./vector_multiply', str(processes)], stdout=subprocess.PIPE)
-# test = subprocess.Popen(['./test', str(processes)], stdout=subprocess.PIPE)
+external_cal_test = subprocess.Popen(['./external_cal', str(processes)], stdout=subprocess.PIPE)
+parallel_cal_test = subprocess.Popen(['./parallel_cal', str(processes)], stdout=subprocess.PIPE)
+vector_multiply_test = subprocess.Popen(['./vector_multiply', str(processes)], stdout=subprocess.PIPE)
+test = subprocess.Popen(['./test', str(processes)], stdout=subprocess.PIPE)
 
-# print('')
-# print('./vector_multiply')
-# print(vector_multiply_test.communicate()[0].decode())
+print('')
+print('./vector_multiply')
+print(vector_multiply_test.communicate()[0].decode())
 
-# print('./external_cal')
-# print(external_cal_test.communicate()[0].decode())
+print('./external_cal')
+print(external_cal_test.communicate()[0].decode())
 
-# print('./parallel_cal')
-# print(parallel_cal_test.communicate()[0].decode())
+print('./parallel_cal')
+print(parallel_cal_test.communicate()[0].decode())
 
-# print('./test')
-# print(test.communicate()[0].decode())
+print('./test') 
+print(test.communicate()[0].decode())
