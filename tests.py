@@ -19,7 +19,7 @@ subprocess.run(['make', 'clean'])
 subprocess.run(['make'])
 subprocess.run(['./genRecord.sh'])
 
-processes = 150
+processes = 50
 
 external_cal_test = subprocess.Popen(['./external_cal', str(processes)], stdout=subprocess.PIPE)
 parallel_cal_test = subprocess.Popen(['./parallel_cal', str(processes)], stdout=subprocess.PIPE)

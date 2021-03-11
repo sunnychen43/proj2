@@ -47,6 +47,8 @@ typedef uint8_t rpthread_t;
 typedef struct rpthread_mutex_t {
 	unsigned char lock;
 	rpthread_t tid;
+	ThreadQueue* blocked_queue;
+	
 } rpthread_mutex_t;
 
 typedef struct Scheduler {

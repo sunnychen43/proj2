@@ -112,24 +112,22 @@ int rpthread_join(rpthread_t thread, void **value_ptr) {
 	return 0;
 };
 
-
-
 /* initialize the mutex lock */
 int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr) {
 	//initialize data structures for this mutex
 	mutex->lock = 0;
 	mutex->tid = -1;
+	mutex->blocked_queue = new_queue;
 	return 0;
 };
 
 /* aquire the mutex lock */
 int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
+	disable_timer();
 	while (__sync_lock_test_and_set(&(mutex->lock), 1) == 1) {
-		tcb_t *running = scheduler->running;
-		if (running->priority < MLFQ_LEVELS-1) {
-			running->priority++;
-		}
-		rpthread_yield();
+		enqueue(mutex->blocked_queue, scheduler->running);
+		scheduler->tcb_arr[scheduler->running->tid]->state = BLOCKED;
+		schedule();
 	}
 	mutex->tid = scheduler->running->tid;
 	return 0;
@@ -139,6 +137,10 @@ int rpthread_mutex_lock(rpthread_mutex_t *mutex) {
 int rpthread_mutex_unlock(rpthread_mutex_t *mutex) {
 	if (mutex->tid == scheduler->running->tid) {
 		__sync_lock_test_and_set(&(mutex->lock), 0);
+		if (mutex->blocked_queue->size > 0) {
+			tcb_t *tcb = dequeue(mutex->blocked_queue);
+			enqueue(scheduler->thread_queues[tcb->priority], tcb);
+		}
 	}
 	else {
 		printf("mutex error\n");
