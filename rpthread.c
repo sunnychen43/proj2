@@ -9,7 +9,7 @@ void enable_timer();
 void disable_timer();
 
 static Scheduler *scheduler;
-static struct itimerval itimer;
+static struct itimerval itimer, pause_itimer;
 static struct sigaction sa;
 static bool enabled;
 
@@ -203,6 +203,14 @@ tcb_t* mlfq_find_next_ready() {
 	return NULL;
 }
 
+void print_queue(tcb_t *head) {
+	while (head != NULL) {
+		printf("%d->", head->tid);
+		head = head->next;
+	}
+	printf("\n");
+}
+
 static void schedule() {
 	disable_timer();
 	tcb_t *old_tcb = scheduler->running;
@@ -211,6 +219,7 @@ static void schedule() {
 	// 	printf("%d ", scheduler->thread_queues[i]->size);
 	// }
 	// printf("\n");
+	print_queue(scheduler->thread_queues[0]->head);
 	// called from handle_exit
 	if (scheduler->ts_arr[old_tcb->tid] == FINISHED) {
 		free_tcb(old_tcb);
