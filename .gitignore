@@ -2,15 +2,16 @@
 !/**/
 !*.*
 
-test.c
+./test.c
 *.txt
 
 *.json
 .gdb_history
 *.out
 
-benchmarks/
 !Makefile
 
 *.a
 *.o
+
+benchmarks/record/
