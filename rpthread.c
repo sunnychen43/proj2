@@ -1,3 +1,6 @@
+// File:  rpthread.c
+// List all group member's name: Sunny Chen, Michael Zhao
+
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <stdio.h>
@@ -210,15 +213,6 @@ int rpthread_mutex_destroy(rpthread_mutex_t *mutex) {
 
 
 /********** Rpthread Private Functions **********/
-
-void print_queue(tcb_t *head) {
-	printf("->");
-	while (head != NULL) {
-		printf("%d->", head->tid);
-		head = head->next;
-	}
-	printf("\n");
-}
 
 /* Set timer to time (ms) */
 void enable_timer(int time) {

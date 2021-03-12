@@ -1,8 +1,5 @@
-// File:	rpthread_t.h
-
-// List all group member's name:
-// username of iLab:
-// iLab Server:
+// File:  rpthread.h
+// List all group member's name: Sunny Chen, Michael Zhao
 
 #ifndef RTHREAD_T_H
 #define RTHREAD_T_H
