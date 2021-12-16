@@ -1,8 +1,5 @@
-// File:	rpthread_t.h
-
-// List all group member's name:
-// username of iLab:
-// iLab Server:
+// File:  rpthread.h
+// List all group member's name: Sunny Chen, Michael Zhao
 
 #ifndef RTHREAD_T_H
 #define RTHREAD_T_H
@@ -18,83 +15,52 @@
 #define TIMESLICE 5
 #endif
 
-#define READY 0
-#define SCHEDULED 1
-#define BLOCKED 2
-#define FINISHED 3
-#define YIELD 4
 
-#define SS_SIZE 16384
+#define SS_SIZE SIGSTKSZ
+#define MLFQ_LEVELS 8
+
+#define READY 0
+#define BLOCKED 1
+#define FINISHED 2
 
 /* include lib header files that you need here: */
-#include <unistd.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
-#include <sys/time.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdbool.h>
 #include <signal.h>
 #include <ucontext.h>
-#include <stdint.h>
-#include <stdbool.h>
+#include "tcb.h"
 
-typedef uint8_t rpthread_t;
-
-
-typedef struct ThreadQueue {
-	struct tcb_t *head;
-	struct tcb_t *tail;
-	int size;
-
-} ThreadQueue;
-
-
-typedef struct tcb_t {
-	rpthread_t 	tid;
-	uint8_t 	thread_priority;
-
-	ucontext_t 	uctx;
-	struct tcb_t *next;
-
-} tcb_t;
-
-
-typedef struct Scheduler {
-	ThreadQueue *thread_queue;
-	tcb_t 	   	*running;
-
-	char		*ts_arr;
-	uint8_t		 ts_count;
-	uint8_t		 ts_size;
-
-	ucontext_t 	 exit_uctx;
-
-} Scheduler;
 
 typedef struct rpthread_mutex_t {
-
+	unsigned char  lock;
+	rpthread_t 	   tid;
+	queue_t*       blocked_queue;
 } rpthread_mutex_t;
 
 
+typedef struct Scheduler {
+	queue_t*    thread_queues[MLFQ_LEVELS];
+	tcb_t*      running;
 
-ThreadQueue* new_queue();
-void enqueue(ThreadQueue *queue, tcb_t *tcb);
-tcb_t* dequeue(ThreadQueue *queue);
-tcb_t* peek(ThreadQueue *queue);
-tcb_t* new_node(tcb_t *tcb);
+	tcb_t**     tcb_arr;
+	uint8_t		t_count;
+	uint8_t		t_max;
 
-int rpthread_create(rpthread_t *thread, pthread_attr_t *attr, void *(*function)(void *), void *arg);
-int rpthread_yield();
+	ucontext_t* exit_uctx;
+
+	bool enabled;
+
+} Scheduler;
+
+
+int  rpthread_create(rpthread_t *thread, pthread_attr_t *attr, void *(*function)(void *), void *arg);
+int  rpthread_yield();
 void rpthread_exit(void *value_ptr);
-int rpthread_join(rpthread_t thread, void **value_ptr);
+int  rpthread_join(rpthread_t thread, void **value_ptr);
 
 int rpthread_mutex_init(rpthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr);
 int rpthread_mutex_lock(rpthread_mutex_t *mutex);
 int rpthread_mutex_unlock(rpthread_mutex_t *mutex);
 int rpthread_mutex_destroy(rpthread_mutex_t *mutex);
-
-void handle_timeout(int signum);
-void handle_exit();
 
 
 #ifdef USE_RTHREAD
